@@ -8,6 +8,7 @@ They MUST NOT touch StockLevel or StockMovement models directly.
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.shortcuts import get_object_or_404
 
 from .models import Product, Warehouse, StockLevel, StockMovement
 
@@ -22,8 +23,8 @@ def add_stock(*, product_id, warehouse_id, quantity, reason, reference=''):
         raise ValidationError({'quantity': 'Quantity must be greater than zero.'})
 
     with transaction.atomic():
-        product = Product.objects.select_for_update().get(id=product_id)
-        warehouse = Warehouse.objects.select_for_update().get(id=warehouse_id)
+        product = get_object_or_404(Product.objects.select_for_update(), id=product_id)
+        warehouse = get_object_or_404(Warehouse.objects.select_for_update(), id=warehouse_id)
         stock_level, _ = StockLevel.objects.select_for_update().get_or_create(
             product=product,
             warehouse=warehouse,
@@ -54,8 +55,8 @@ def remove_stock(*, product_id, warehouse_id, quantity, reason, reference=''):
         raise ValidationError({'quantity': 'Quantity must be greater than zero.'})
 
     with transaction.atomic():
-        product = Product.objects.select_for_update().get(id=product_id)
-        warehouse = Warehouse.objects.select_for_update().get(id=warehouse_id)
+        product = get_object_or_404(Product.objects.select_for_update(), id=product_id)
+        warehouse = get_object_or_404(Warehouse.objects.select_for_update(), id=warehouse_id)
 
         try:
             stock_level = StockLevel.objects.select_for_update().get(
@@ -105,9 +106,9 @@ def transfer_stock(*, product_id, from_warehouse_id, to_warehouse_id, quantity, 
         })
 
     with transaction.atomic():
-        product = Product.objects.select_for_update().get(id=product_id)
-        from_warehouse = Warehouse.objects.select_for_update().get(id=from_warehouse_id)
-        to_warehouse = Warehouse.objects.select_for_update().get(id=to_warehouse_id)
+        product = get_object_or_404(Product.objects.select_for_update(), id=product_id)
+        from_warehouse = get_object_or_404(Warehouse.objects.select_for_update(), id=from_warehouse_id)
+        to_warehouse = get_object_or_404(Warehouse.objects.select_for_update(), id=to_warehouse_id)
 
         # --- same-org validation (spec I3) ---
         if from_warehouse.organization_id != to_warehouse.organization_id:

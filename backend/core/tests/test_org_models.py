@@ -620,8 +620,12 @@ class OwnerAPITests(TestCase):
         response = self.client.delete(f'/api/v1/orgs/{self.org.id}/')
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_owner_can_promote_co_owner(self):
-        """O3: Owner promotes another member to co-owner."""
+    def test_is_owner_is_read_only_even_for_owner(self):
+        """fix-audit-findings: is_owner is read-only on the membership
+        endpoint for everyone (including the org owner) — no frontend
+        flow sets it via the API, so it's silently ignored on write to
+        fully close the privilege-escalation vector (spec: Membership
+        Role/Ownership Write Authorization)."""
         self._login('api-owner@test.com')
 
         membership = OrganizationMembership.all_objects.get(
@@ -634,7 +638,7 @@ class OwnerAPITests(TestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         membership.refresh_from_db()
-        self.assertTrue(membership.is_owner)
+        self.assertFalse(membership.is_owner)
 
     def test_fiscal_fields_null_by_default(self):
         """F4: Org works without fiscal fields — all null."""
@@ -703,3 +707,92 @@ class BackfillOwnersCommandTest(TestCase):
         self.assertTrue(m1.is_owner)
         m2 = OrganizationMembership.all_objects.get(user=self.u2, organization=self.org_a)
         self.assertFalse(m2.is_owner)
+
+
+# =============================================================================
+# Membership create error messaging (fix-audit-findings — Phase 3)
+# =============================================================================
+
+
+class MembershipCreateErrorMessagingTests(TestCase):
+    """Spec: Membership Create Error Messaging.
+
+    A create request with no resolvable user must return a distinct
+    ``invite_email`` field error, separate from the duplicate-membership
+    error.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.org = Organization.objects.create(
+            name='Invite Msg Org', tax_id='INVITE-MSG-001',
+        )
+        self.role = Role.objects.create(
+            name='Admin', organization=self.org,
+            permissions={'core': ['admin']},
+        )
+        self.owner = User.objects.create_user(
+            email='invite-owner@test.com', password='Pass1234', full_name='Owner',
+        )
+        OrganizationMembership.objects.create(
+            user=self.owner, organization=self.org, role=self.role,
+            is_owner=True, is_default=True,
+        )
+
+    def _login(self, email='invite-owner@test.com'):
+        resp = self.client.post('/api/v1/auth/login/', {
+            'email': email, 'password': 'Pass1234',
+        }, format='json')
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {resp.data["access"]}')
+
+    def test_create_without_user_or_invite_email_returns_invite_email_error(self):
+        """Missing user (no invite_email resolving to a user) → a specific
+        invite_email field error, not a generic/duplicate-style message."""
+        self._login()
+        response = self.client.post(
+            '/api/v1/memberships/',
+            {'role': str(self.role.id)},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        errors = response.data.get('errors', [])
+        self.assertTrue(
+            any(e.get('field') == 'invite_email' for e in errors),
+            f'Expected an invite_email field error, got: {errors}',
+        )
+        self.assertTrue(
+            any('requerido' in str(e.get('message', '')).lower() for e in errors),
+            f'Expected a "required" message, got: {errors}',
+        )
+        # Must NOT be the duplicate-membership message.
+        self.assertFalse(
+            any('ya es miembro' in str(e.get('message', '')).lower() for e in errors),
+            f'Missing-user error must not read as a duplicate-membership error: {errors}',
+        )
+
+    def test_create_duplicate_membership_returns_distinct_duplicate_error(self):
+        """A membership create for a user already in the org raises the
+        distinct duplicate-membership error, not the missing-user message."""
+        self._login()
+        member = User.objects.create_user(
+            email='already-member@test.com', password='Pass1234', full_name='Already Member',
+        )
+        OrganizationMembership.objects.create(
+            user=member, organization=self.org, role=self.role,
+        )
+
+        response = self.client.post(
+            '/api/v1/memberships/',
+            {'invite_email': 'already-member@test.com', 'role': str(self.role.id)},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        errors = response.data.get('errors', [])
+        self.assertTrue(
+            any('ya es miembro' in str(e.get('message', '')).lower() for e in errors),
+            f'Expected the duplicate-membership message, got: {errors}',
+        )
+        self.assertFalse(
+            any('requerido' in str(e.get('message', '')).lower() for e in errors),
+            f'Duplicate-membership error must not read as a missing-user error: {errors}',
+        )

@@ -242,6 +242,11 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
             return [permissions.IsAuthenticated()]
+        if self.action in ('create', 'update', 'partial_update') and 'role' in self.request.data:
+            # Changing/assigning a role requires org ownership — closes the
+            # privilege-escalation vector where a core:write member could
+            # otherwise assign themselves (or others) a more powerful role.
+            return [permissions.IsAuthenticated(), IsOrgOwner()]
         return [permissions.IsAuthenticated(), OrgRolePermission('core', 'write')]
 
     def perform_create(self, serializer):

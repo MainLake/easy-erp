@@ -8,13 +8,14 @@ Spec coverage:
 """
 
 import json
+import uuid
 
 from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework import status
 
 from core.tests import OrgTestMixin
-from core.models import Role, OrganizationMembership
+from core.models import Role, OrganizationMembership, Organization
 from inventory.models import Category, Product, Warehouse, StockLevel, StockMovement
 
 
@@ -407,3 +408,124 @@ class StockMovementTests(OrgTestMixin, TestCase):
         results = body['data']
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]['movement_type'], 'add')
+
+
+# ---------------------------------------------------------------------------
+# 404 safety for missing/cross-org references (fix-audit-findings — Phase 2)
+# ---------------------------------------------------------------------------
+
+class StockMutation404SafetyTests(OrgTestMixin, TestCase):
+    """Spec: Safe 404 for Missing/Cross-Org References.
+
+    add_stock/remove_stock/transfer_stock must return a 404 in the
+    standard envelope for unknown or cross-org product/warehouse ids,
+    never an unhandled 500.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self.operator = self.create_org_user(
+            '404-op@easyerp.local',
+            full_name='404 Operator',
+        )
+        self._login(self.client, self.operator)
+
+        self.product = Product.objects.create(
+            sku='404-TEST', name='404 Test', cost='1', price='2',
+            organization=self.org,
+        )
+        self.unknown_id = uuid.uuid4()
+
+        # A second, unrelated org + warehouse for cross-org tests.
+        self.other_org = Organization.objects.create(
+            name='Other Org 404', tax_id='OTHER-ORG-404',
+        )
+        self.foreign_warehouse = Warehouse.objects.create(
+            name='Foreign Warehouse', organization=self.other_org,
+        )
+
+    def test_add_stock_unknown_product_returns_404_envelope(self):
+        """Unknown product_id → HTTP 404 in {data,errors,meta} envelope."""
+        response = self.client.post(
+            f'/api/v1/inventory/products/{self.unknown_id}/add-stock/',
+            {
+                'warehouse_id': str(self.warehouse.id),
+                'quantity': 5,
+                'reason': 'unknown product',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        body = _envelope(response)
+        self.assertIsNone(body['data'])
+        self.assertTrue(len(body['errors']) >= 1)
+        self.assertEqual(body['errors'][0]['code'], 'not_found')
+
+    def test_add_stock_cross_org_warehouse_returns_404_envelope(self):
+        """Warehouse belonging to a different org → HTTP 404 envelope."""
+        response = self.client.post(
+            f'/api/v1/inventory/products/{self.product.id}/add-stock/',
+            {
+                'warehouse_id': str(self.foreign_warehouse.id),
+                'quantity': 5,
+                'reason': 'cross-org warehouse',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        body = _envelope(response)
+        self.assertIsNone(body['data'])
+        self.assertEqual(body['errors'][0]['code'], 'not_found')
+
+    def test_remove_stock_unknown_product_returns_404_envelope(self):
+        response = self.client.post(
+            f'/api/v1/inventory/products/{self.unknown_id}/remove-stock/',
+            {
+                'warehouse_id': str(self.warehouse.id),
+                'quantity': 1,
+                'reason': 'unknown product',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        body = _envelope(response)
+        self.assertIsNone(body['data'])
+        self.assertEqual(body['errors'][0]['code'], 'not_found')
+
+    def test_transfer_stock_cross_org_to_warehouse_returns_404_envelope(self):
+        """Unknown to_warehouse_id in transfer → HTTP 404 envelope."""
+        self.client.post(
+            f'/api/v1/inventory/products/{self.product.id}/add-stock/',
+            {'warehouse_id': str(self.warehouse.id), 'quantity': 10, 'reason': 'setup'},
+            format='json',
+        )
+        response = self.client.post(
+            f'/api/v1/inventory/products/{self.product.id}/transfer-stock/',
+            {
+                'from_warehouse_id': str(self.warehouse.id),
+                'to_warehouse_id': str(self.unknown_id),
+                'quantity': 1,
+                'reason': 'unknown destination',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        body = _envelope(response)
+        self.assertIsNone(body['data'])
+        self.assertEqual(body['errors'][0]['code'], 'not_found')
+
+    def test_add_stock_valid_same_org_ids_still_succeeds(self):
+        """Regression guard: valid same-org product/warehouse ids still work."""
+        response = self.client.post(
+            f'/api/v1/inventory/products/{self.product.id}/add-stock/',
+            {
+                'warehouse_id': str(self.warehouse.id),
+                'quantity': 7,
+                'reason': 'regression check',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        level = StockLevel.objects.get(product=self.product, warehouse=self.warehouse)
+        self.assertEqual(level.quantity, 7)
