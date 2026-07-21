@@ -36,6 +36,11 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    # Multi-org: resolve active org from JWT or X-Organization header.
+    # MUST run after AuthenticationMiddleware so request.user is set,
+    # but before view processing so OrgAwareManager and OrgRolePermission
+    # have the correct org context (spec X4, design decision #1).
+    'core.middleware.OrganizationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -135,4 +140,7 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': False,
     'AUTH_HEADER_TYPES': ('Bearer',),
+    # Multi-org: inject active_organization_id claim into every access token
+    # (spec A1, design decision #4).
+    'TOKEN_OBTAIN_SERIALIZER': 'core.jwt_serializers.CustomTokenObtainPairSerializer',
 }

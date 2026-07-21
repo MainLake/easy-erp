@@ -135,6 +135,30 @@ class User(AbstractBaseUser, PermissionsMixin):
             or self.memberships.select_related('role', 'organization').first()
         )
 
+    def get_active_membership(self, org_id=None):
+        """Return the membership for the given *org_id*, or for the
+        thread-local org, or the default membership.
+
+        This method is the preferred way for permission checks to
+        locate the user's role in the current request scope (spec R3).
+        """
+        if org_id is None:
+            from .managers import get_current_organization
+            org_id = get_current_organization()
+
+        if org_id:
+            member = (
+                self.memberships
+                .filter(organization_id=org_id)
+                .select_related('role', 'organization')
+                .first()
+            )
+            if member is not None:
+                return member
+
+        # Fallback to default / first membership
+        return self.active_membership
+
 
 # ---------------------------------------------------------------------------
 # Multi-org models
