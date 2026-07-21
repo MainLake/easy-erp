@@ -23,15 +23,18 @@
               <td>{{ m.user_name }}</td>
               <td>{{ m.user_email }}</td>
               <td>
-                <select
-                  v-model="m._selectedRole"
-                  class="form-input form-input-sm role-select"
-                  :disabled="m._saving || m.user === currentUserId"
-                  @change="handleRoleChange(m)"
-                >
-                  <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
-                </select>
-                <span v-if="m._saving" class="spinner" />
+                <div class="role-cell">
+                  <select
+                    v-model="m._selectedRole"
+                    class="form-input form-input-sm role-select"
+                    :disabled="m._saving || m.user === currentUserId"
+                    @change="handleRoleChange(m)"
+                  >
+                    <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
+                  </select>
+                  <span v-if="m._saving" class="spinner" />
+                  <span v-if="m.user === currentUserId" class="self-hint" title="No podés cambiar tu propio rol">(vos)</span>
+                </div>
               </td>
               <td>
                 <span v-if="m.is_owner" class="badge badge-sent">Owner</span>
@@ -209,6 +212,19 @@ async function handleInvite() {
 
 .role-select {
   min-width: 150px;
+}
+
+.role-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.self-hint {
+  font-size: 0.75rem;
+  color: var(--color-muted);
+  cursor: help;
+  white-space: nowrap;
 }
 
 .empty-row {
