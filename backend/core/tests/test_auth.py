@@ -203,12 +203,25 @@ class PaginationTests(TestCase):
     """X2: List endpoints support ?page= and ?page_size= with meta."""
 
     def setUp(self):
+        from core.models import Organization, Role, OrganizationMembership
+        from inventory.models import Product
+
         self.client = APIClient()
+        self.org = Organization.objects.create(
+            name='Pag Org', tax_id='PAG-TAX-001',
+        )
+        self.role = Role.objects.create(
+            name='Pag Admin', organization=self.org,
+            permissions={'inventory': ['admin']},
+        )
         self.operator = User.objects.create_user(
             email='pag-operator@easyerp.local',
             password='testpass123',
             full_name='Pag Op',
-            role=User.Role.OPERATOR,
+        )
+        OrganizationMembership.objects.create(
+            user=self.operator, organization=self.org,
+            role=self.role, is_default=True,
         )
         resp = self.client.post('/api/v1/auth/login/', {
             'email': 'pag-operator@easyerp.local',
@@ -217,13 +230,13 @@ class PaginationTests(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {resp.data["access"]}')
 
         # Create 25 products to test pagination
-        from inventory.models import Product
         for i in range(25):
             Product.objects.create(
                 sku=f'PAG-{i:03d}',
                 name=f'Product {i}',
                 cost='1.00',
                 price='2.00',
+                organization=self.org,
             )
 
     def test_pagination_meta_includes_count_next_previous(self):
@@ -258,12 +271,25 @@ class FilteringTests(TestCase):
     """X3: List endpoints support field filtering via query params."""
 
     def setUp(self):
+        from core.models import Organization, Role, OrganizationMembership
+        from inventory.models import Product, Category
+
         self.client = APIClient()
+        self.org = Organization.objects.create(
+            name='Filt Org', tax_id='FILT-TAX-001',
+        )
+        self.role = Role.objects.create(
+            name='Filt Admin', organization=self.org,
+            permissions={'inventory': ['admin']},
+        )
         self.operator = User.objects.create_user(
             email='filt-op@easyerp.local',
             password='testpass123',
             full_name='Filt Op',
-            role=User.Role.OPERATOR,
+        )
+        OrganizationMembership.objects.create(
+            user=self.operator, organization=self.org,
+            role=self.role, is_default=True,
         )
         resp = self.client.post('/api/v1/auth/login/', {
             'email': 'filt-op@easyerp.local',
@@ -271,12 +297,24 @@ class FilteringTests(TestCase):
         }, format='json')
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {resp.data["access"]}')
 
-        from inventory.models import Product, Category
-        self.cat_a = Category.objects.create(name='Electronics')
-        self.cat_b = Category.objects.create(name='Furniture')
-        Product.objects.create(sku='FILT-E1', name='Phone', cost='100', price='200', category=self.cat_a)
-        Product.objects.create(sku='FILT-E2', name='Laptop', cost='500', price='1000', category=self.cat_a)
-        Product.objects.create(sku='FILT-F1', name='Chair', cost='50', price='100', category=self.cat_b)
+        self.cat_a = Category.objects.create(
+            name='Electronics', organization=self.org,
+        )
+        self.cat_b = Category.objects.create(
+            name='Furniture', organization=self.org,
+        )
+        Product.objects.create(
+            sku='FILT-E1', name='Phone', cost='100', price='200',
+            category=self.cat_a, organization=self.org,
+        )
+        Product.objects.create(
+            sku='FILT-E2', name='Laptop', cost='500', price='1000',
+            category=self.cat_a, organization=self.org,
+        )
+        Product.objects.create(
+            sku='FILT-F1', name='Chair', cost='50', price='100',
+            category=self.cat_b, organization=self.org,
+        )
 
     def test_filter_by_name_exact_match(self):
         """X3: ?name=Phone returns only matching product."""
