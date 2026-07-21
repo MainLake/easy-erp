@@ -21,10 +21,15 @@
         <span :class="`badge badge-${value}`">{{ (statusLabels as any)[value] || value }}</span>
       </template>
       <template #cell-order_date="{ value }">{{ new Date(value).toLocaleDateString() }}</template>
+      <template #cell-approval_status="{ value }">
+        <span v-if="value && value !== 'none'" :class="`badge badge-${value}`">{{ (approvalStatusLabels as any)[value] || value }}</span>
+      </template>
       <template #actions="{ row }">
         <button class="btn-sm" @click="openView(row)">Ver</button>
         <button v-if="row.status === 'draft' && hasPermission('sales', 'write')" class="btn-sm btn-sm-action" @click="handleConfirm(row)">Confirmar</button>
         <button v-if="row.status === 'confirmed' && hasPermission('sales', 'write')" class="btn-sm btn-sm-action" @click="handleFulfill(row)">Completar</button>
+        <button v-if="row.approval_status === 'pending'" class="btn-sm btn-sm-action" @click="handleApprove(row)">Aprobar</button>
+        <button v-if="row.approval_status === 'pending'" class="btn-sm btn-sm-danger" @click="handleReject(row)">Rechazar</button>
       </template>
     </DataTable>
 
@@ -89,7 +94,10 @@
       <div v-if="viewModalOpen" class="modal-overlay" @click.self="viewModalOpen = false">
         <div class="modal-container modal-wide">
           <div class="modal-header">
-            <h3>OV #{{ viewing?.id?.slice(0, 8) }} — <span :class="`badge badge-${viewing?.status}`">{{ viewing?.status }}</span></h3>
+            <h3>
+              OV #{{ viewing?.id?.slice(0, 8) }} — <span :class="`badge badge-${viewing?.status}`">{{ viewing?.status }}</span>
+              <span v-if="viewing?.approval_status && viewing.approval_status !== 'none'" :class="`badge badge-${viewing.approval_status}`">{{ (approvalStatusLabels as any)[viewing.approval_status] || viewing.approval_status }}</span>
+            </h3>
             <button class="modal-close" @click="viewModalOpen = false">×</button>
           </div>
           <div class="modal-body">
@@ -147,6 +155,7 @@ const viewing = ref<any>(null)
 const columns = [
   { key: 'customer_name', label: 'Cliente' },
   { key: 'status', label: 'Estado' },
+  { key: 'approval_status', label: 'Aprobación' },
   { key: 'order_date', label: 'Fecha' },
   { key: 'notes', label: 'Notas' },
   { key: 'created_by_name', label: 'Creado por' },
@@ -157,6 +166,12 @@ const statusLabels = {
   confirmed: 'confirmado',
   fulfilled: 'completado',
   cancelled: 'cancelado',
+}
+
+const approvalStatusLabels = {
+  pending: 'Pendiente de aprobación',
+  approved: 'Aprobada',
+  rejected: 'Rechazada',
 }
 
 async function fetchData() {
@@ -248,6 +263,26 @@ async function handleFulfill(row: any) {
   if (!res.ok) {
     const e = await res.json()
     alert(e.errors?.detail || 'Error al completar')
+  }
+  fetchData()
+}
+
+async function handleApprove(row: any) {
+  if (!confirm(`¿Aprobar OV para "${row.customer_name}"?`)) return
+  const res = await request(`/sales/orders/${row.id}/approve/`, { method: 'POST' })
+  if (!res.ok) {
+    const e = await res.json()
+    alert(e.errors?.[0]?.message || 'Error al aprobar la orden')
+  }
+  fetchData()
+}
+
+async function handleReject(row: any) {
+  if (!confirm(`¿Rechazar OV para "${row.customer_name}"?`)) return
+  const res = await request(`/sales/orders/${row.id}/reject/`, { method: 'POST' })
+  if (!res.ok) {
+    const e = await res.json()
+    alert(e.errors?.[0]?.message || 'Error al rechazar la orden')
   }
   fetchData()
 }

@@ -375,6 +375,21 @@ select.form-input {
   color: #b91c1c;
 }
 
+.badge-pending {
+  background: var(--color-warning-light);
+  color: #b45309;
+}
+
+.badge-approved {
+  background: var(--color-success-light);
+  color: #047857;
+}
+
+.badge-rejected {
+  background: var(--color-danger-light);
+  color: #b91c1c;
+}
+
 /* === Modals === */
 .modal-overlay {
   position: fixed;
