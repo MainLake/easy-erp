@@ -4,22 +4,20 @@ Phase 4 tests: Invoicing (B1, B2, B3).
 Spec coverage:
   B1 — Invoice generation from fulfilled SO only. Non-fulfilled → 400.
   B2 — Credit and debit notes linked to an invoice.
-  B3 — Invoice numbers MUST be sequential per legal entity.
+  B3 — Invoice numbers MUST be sequential per organization.
 """
 
 import json
 
-from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework import status
 
+from core.tests import OrgTestMixin
 from inventory.models import Product, Warehouse
 from inventory import services as inventory_services
 from sales.models import Customer, SalesOrder
 from invoicing.models import Organization, Invoice, CreditDebitNote
-
-User = get_user_model()
 
 
 def _envelope(response):
@@ -27,34 +25,35 @@ def _envelope(response):
     return json.loads(response.content)
 
 
-class InvoiceGenerationTests(TestCase):
+class InvoiceGenerationTests(OrgTestMixin, TestCase):
     """B1: Invoice generation from fulfilled SO only."""
 
     def setUp(self):
+        super().setUp()
         self.client = APIClient()
-        self.operator = User.objects.create_user(
-            email='op-inv@easyerp.local',
-            password='testpass123',
+        self.operator = self.create_org_user(
+            'op-inv@easyerp.local',
             full_name='Op Inv',
-            role=User.Role.OPERATOR,
         )
-        resp = self.client.post('/api/v1/auth/login/', {
-            'email': 'op-inv@easyerp.local',
-            'password': 'testpass123',
-        }, format='json')
-        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {resp.data["access"]}')
+        self._login(self.client, self.operator)
 
-        # Setup: org, product, warehouse, customer, SO
-        self.org = Organization.objects.create(name='Test Org', tax_id='INV-TAX-001')
+        # Create invoicing Organization linked to the core org
+        self.inv_org = Organization.objects.create(
+            name='Test Org',
+            tax_id='INV-TAX-001',
+            core_organization=self.org,
+        )
         self.product = Product.objects.create(
             sku='INV-SKU', name='Invoiceable', cost='10', price='25',
+            organization=self.org,
         )
-        self.warehouse = Warehouse.objects.create(name='Inv WH')
-        self.customer = Customer.objects.create(name='Inv Customer', tax_id='CUST-INV-001')
+        self.customer = Customer.objects.create(
+            name='Inv Customer', tax_id='CUST-INV-001',
+            organization=self.org,
+        )
 
     def _create_fulfilled_so(self, quantity=5):
         """Helper: create and fulfill a sales order."""
-        # Add stock
         inventory_services.add_stock(
             product_id=self.product.id,
             warehouse_id=self.warehouse.id,
@@ -62,7 +61,6 @@ class InvoiceGenerationTests(TestCase):
             reason='test stock',
         )
 
-        # Create SO
         create_resp = self.client.post('/api/v1/sales/orders/', {
             'customer': str(self.customer.id),
             'line_items_write': [{
@@ -74,7 +72,6 @@ class InvoiceGenerationTests(TestCase):
         }, format='json')
         so_id = create_resp.data['id']
 
-        # Confirm + fulfill
         self.client.post(f'/api/v1/sales/orders/{so_id}/confirm/')
         self.client.post(f'/api/v1/sales/orders/{so_id}/fulfill/')
 
@@ -105,7 +102,6 @@ class InvoiceGenerationTests(TestCase):
         self.assertIn('number', response.data)
         self.assertTrue(response.data['number'].startswith('INV-'))
         self.assertEqual(response.data['status'], 'issued')
-        # Total should be 3 × 25 = 75
         self.assertEqual(str(response.data['total']), '75.00')
 
     def test_generate_invoice_from_draft_so_returns_400(self):
@@ -119,7 +115,9 @@ class InvoiceGenerationTests(TestCase):
 
     def test_generate_invoice_missing_sales_order_id_returns_400(self):
         """B1: Missing sales_order_id → 400."""
-        response = self.client.post('/api/v1/invoicing/invoices/generate/', {}, format='json')
+        response = self.client.post(
+            '/api/v1/invoicing/invoices/generate/', {}, format='json',
+        )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('errors', response.data)
 
@@ -131,27 +129,30 @@ class InvoiceGenerationTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
-class CreditDebitNoteTests(TestCase):
+class CreditDebitNoteTests(OrgTestMixin, TestCase):
     """B2: Credit and debit notes linked to an invoice."""
 
     def setUp(self):
+        super().setUp()
         self.client = APIClient()
-        self.operator = User.objects.create_user(
-            email='op-note@easyerp.local',
-            password='testpass123',
+        self.operator = self.create_org_user(
+            'op-note@easyerp.local',
             full_name='Op Note',
-            role=User.Role.OPERATOR,
         )
-        resp = self.client.post('/api/v1/auth/login/', {
-            'email': 'op-note@easyerp.local',
-            'password': 'testpass123',
-        }, format='json')
-        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {resp.data["access"]}')
+        self._login(self.client, self.operator)
 
-        self.org = Organization.objects.create(name='Note Org', tax_id='NOTE-TAX-001')
-        self.product = Product.objects.create(sku='NOTE-SKU', name='Notable', cost='5', price='20')
-        self.warehouse = Warehouse.objects.create(name='Note WH')
-        self.customer = Customer.objects.create(name='Note Customer', tax_id='CUST-NOTE-001')
+        self.inv_org = Organization.objects.create(
+            name='Note Org', tax_id='NOTE-TAX-001',
+            core_organization=self.org,
+        )
+        self.product = Product.objects.create(
+            sku='NOTE-SKU', name='Notable', cost='5', price='20',
+            organization=self.org,
+        )
+        self.customer = Customer.objects.create(
+            name='Note Customer', tax_id='CUST-NOTE-001',
+            organization=self.org,
+        )
 
         # Create fulfilled SO and invoice
         inventory_services.add_stock(
@@ -212,7 +213,9 @@ class CreditDebitNoteTests(TestCase):
             'reason': 'Discount',
         }, format='json')
 
-        response = self.client.get(f'/api/v1/invoicing/invoices/{self.invoice_id}/')
+        response = self.client.get(
+            f'/api/v1/invoicing/invoices/{self.invoice_id}/',
+        )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data['notes']), 1)
         self.assertEqual(response.data['notes'][0]['type'], 'credit')
@@ -228,31 +231,37 @@ class CreditDebitNoteTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
-class SequentialNumberingTests(TestCase):
-    """B3: Invoice numbers MUST be sequential per legal entity."""
+class SequentialNumberingTests(OrgTestMixin, TestCase):
+    """B3: Invoice numbers MUST be sequential per organization."""
 
     def setUp(self):
+        super().setUp()
         self.client = APIClient()
-        self.operator = User.objects.create_user(
-            email='op-seq@easyerp.local',
-            password='testpass123',
+        self.operator = self.create_org_user(
+            'op-seq@easyerp.local',
             full_name='Op Seq',
-            role=User.Role.OPERATOR,
         )
-        resp = self.client.post('/api/v1/auth/login/', {
-            'email': 'op-seq@easyerp.local',
-            'password': 'testpass123',
-        }, format='json')
-        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {resp.data["access"]}')
+        self._login(self.client, self.operator)
 
-        self.org = Organization.objects.create(name='Seq Org', tax_id='SEQ-TAX-001')
-        self.product = Product.objects.create(sku='SEQ-SKU', name='Sequential', cost='5', price='10')
-        self.warehouse = Warehouse.objects.create(name='Seq WH')
-        self.customer = Customer.objects.create(name='Seq Customer', tax_id='CUST-SEQ-001')
+        self.inv_org = Organization.objects.create(
+            name='Seq Org', tax_id='SEQ-TAX-001',
+            core_organization=self.org,
+        )
+        self.product = Product.objects.create(
+            sku='SEQ-SKU', name='Sequential', cost='5', price='10',
+            organization=self.org,
+        )
+        self.customer = Customer.objects.create(
+            name='Seq Customer', tax_id='CUST-SEQ-001',
+            organization=self.org,
+        )
 
     def _create_fulfilled_so(self, sku, quantity=3):
-        """Helper to create a fulfilled SO for invoicing."""
-        product = Product.objects.create(sku=sku, name=f'Product {sku}', cost='5', price='10')
+        """Helper: create a fulfilled SO for invoicing."""
+        product = Product.objects.create(
+            sku=sku, name=f'Product {sku}', cost='5', price='10',
+            organization=self.org,
+        )
         inventory_services.add_stock(
             product_id=product.id,
             warehouse_id=self.warehouse.id,
@@ -327,15 +336,15 @@ class SequentialNumberingTests(TestCase):
 
     def test_org_invoice_number_increments_after_generation(self):
         """B3: Organization's last_invoice_number increments correctly."""
-        self.assertEqual(self.org.last_invoice_number, 0)
+        self.assertEqual(self.inv_org.last_invoice_number, 0)
 
         so_id, _ = self._create_fulfilled_so('SEQ-INC')
         self.client.post('/api/v1/invoicing/invoices/generate/', {
             'sales_order_id': so_id,
         }, format='json')
 
-        self.org.refresh_from_db()
-        self.assertEqual(self.org.last_invoice_number, 1)
+        self.inv_org.refresh_from_db()
+        self.assertEqual(self.inv_org.last_invoice_number, 1)
 
     def test_invoice_list_endpoint_works(self):
         """B3: List invoices returns generated invoices."""
