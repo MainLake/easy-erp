@@ -155,6 +155,16 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
                 })
         return attrs
 
+    def create(self, validated_data):
+        """Handle duplicate membership gracefully."""
+        from django.db import IntegrityError
+        try:
+            return super().create(validated_data)
+        except IntegrityError:
+            raise serializers.ValidationError({
+                'invite_email': 'Este usuario ya es miembro de la organización.',
+            })
+
 
 # ---------------------------------------------------------------------------
 # RegisterSerializer — self-service signup (spec R1-R9)
