@@ -7,12 +7,19 @@ Spec coverage:
   P3 — Receiving PO MUST increment stock for each line item.
 """
 
+import json
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework import status
 
 from inventory.models import Product, Warehouse, StockLevel
+
+
+def _envelope(response):
+    """Parse envelope-wrapped response body into {data, errors, meta}."""
+    return json.loads(response.content)
 from purchasing.models import Supplier, PurchaseOrder, POLineItem
 
 User = get_user_model()
@@ -71,7 +78,8 @@ class SupplierCRUDTests(TestCase):
         Supplier.objects.create(name='Beta', tax_id='T-B')
         response = self.client.get('/api/v1/purchasing/suppliers/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['count'], 2)
+        body = _envelope(response)
+        self.assertEqual(body['meta']['count'], 2)
 
     def test_retrieve_supplier(self):
         """P1: GET detail → 200."""

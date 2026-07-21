@@ -7,12 +7,19 @@ Spec coverage:
   I3 — Stock movements: add, remove, transfer
 """
 
+import json
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework import status
 
 from inventory.models import Category, Product, Warehouse, StockLevel, StockMovement
+
+
+def _envelope(response):
+    """Parse envelope-wrapped response body into {data, errors, meta}."""
+    return json.loads(response.content)
 
 User = get_user_model()
 
@@ -67,7 +74,8 @@ class ProductCRUDTests(TestCase):
             'price': '15.00',
         }, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('sku', response.data)
+        errors = response.data.get('errors', [])
+        self.assertTrue(any(e.get('field') == 'sku' for e in errors))
 
     def test_create_product_missing_required_fields_returns_400(self):
         """I1: Missing required fields → 400."""
@@ -84,7 +92,8 @@ class ProductCRUDTests(TestCase):
         Product.objects.create(sku='B-1', name='Beta', cost='3.00', price='4.00')
         response = self.client.get('/api/v1/inventory/products/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['count'], 2)
+        body = _envelope(response)
+        self.assertEqual(body['meta']['count'], 2)
 
     def test_retrieve_product(self):
         """I1: GET detail → 200 with product data."""
@@ -170,7 +179,8 @@ class StockLevelTests(TestCase):
         self._add_stock(self.product, self.warehouse, 10)
         response = self.client.get('/api/v1/inventory/products/stock/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        results = response.data['results'] if 'results' in response.data else response.data
+        body = _envelope(response)
+        results = body['data']
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]['quantity'], 10)
 
@@ -362,6 +372,7 @@ class StockMovementTests(TestCase):
 
         response = self.client.get('/api/v1/inventory/movements/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        results = response.data['results'] if 'results' in response.data else response.data
+        body = _envelope(response)
+        results = body['data']
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]['movement_type'], 'add')

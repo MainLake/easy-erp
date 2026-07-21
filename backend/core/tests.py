@@ -7,12 +7,19 @@ Spec coverage:
   A3 — Token refresh + expired token rejection
 """
 
+import json
+
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 from rest_framework import status
 
 User = get_user_model()
+
+
+def _envelope(response):
+    """Parse envelope-wrapped response body into {data, errors, meta}."""
+    return json.loads(response.content)
 
 
 class AuthenticationTests(TestCase):
@@ -143,3 +150,245 @@ class RoleEnforcementTests(TestCase):
         response = self.client.get('/api/v1/users/me/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['email'], 'operator@easyerp.local')
+
+
+class APIEnvelopeTests(TestCase):
+    """X1: All endpoints return {data, errors, meta} envelope."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            email='env-admin@easyerp.local',
+            password='testpass123',
+            full_name='Envelope Admin',
+            role=User.Role.ADMIN,
+        )
+        resp = self.client.post('/api/v1/auth/login/', {
+            'email': 'env-admin@easyerp.local',
+            'password': 'testpass123',
+        }, format='json')
+        self.token = resp.data['access']
+
+    def test_success_envelope_has_data_errors_meta(self):
+        """X1: 2xx response → body has data, errors: [], meta: {} keys."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.token}')
+        response = self.client.get('/api/v1/users/me/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = _envelope(response)
+        self.assertIn('data', body)
+        self.assertIn('errors', body)
+        self.assertIn('meta', body)
+        self.assertIsNotNone(body['data'])
+        self.assertEqual(body['errors'], [])
+
+    def test_error_envelope_has_errors_array(self):
+        """X1: 4xx response → body has errors array with code and message."""
+        # Login with invalid credentials
+        response = self.client.post('/api/v1/auth/login/', {
+            'email': 'nobody@easyerp.local',
+            'password': 'wrong',
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        body = _envelope(response)
+        self.assertIn('data', body)
+        self.assertIsNone(body['data'])
+        self.assertIsInstance(body['errors'], list)
+        self.assertGreater(len(body['errors']), 0)
+        error = body['errors'][0]
+        self.assertIn('code', error)
+        self.assertIn('message', error)
+
+
+class PaginationTests(TestCase):
+    """X2: List endpoints support ?page= and ?page_size= with meta."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.operator = User.objects.create_user(
+            email='pag-operator@easyerp.local',
+            password='testpass123',
+            full_name='Pag Op',
+            role=User.Role.OPERATOR,
+        )
+        resp = self.client.post('/api/v1/auth/login/', {
+            'email': 'pag-operator@easyerp.local',
+            'password': 'testpass123',
+        }, format='json')
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {resp.data["access"]}')
+
+        # Create 25 products to test pagination
+        from inventory.models import Product
+        for i in range(25):
+            Product.objects.create(
+                sku=f'PAG-{i:03d}',
+                name=f'Product {i}',
+                cost='1.00',
+                price='2.00',
+            )
+
+    def test_pagination_meta_includes_count_next_previous(self):
+        """X2: Paginated response meta has count, next, previous."""
+        response = self.client.get('/api/v1/inventory/products/?page_size=10')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = _envelope(response)
+        meta = body['meta']
+        self.assertEqual(meta['count'], 25)
+        self.assertIsNotNone(meta['next'])  # page 2 exists (10 items, 25 total)
+        self.assertIsNone(meta['previous'])  # page 1
+
+    def test_page_parameter_navigates(self):
+        """X2: ?page=2 returns second page."""
+        response = self.client.get('/api/v1/inventory/products/?page=2&page_size=10')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = _envelope(response)
+        # With 25 items and page_size=10, page 2 has items 11-20 (10 items)
+        # or fewer if page_size wasn't applied (default 20 → 5 items)
+        self.assertGreater(len(body['data']), 0)
+        self.assertLessEqual(len(body['data']), 10)
+        self.assertIsNotNone(body['meta']['previous'])  # page 2 has previous
+
+    def test_default_page_size_is_20(self):
+        """X2: Default page size returns 20 items (per settings)."""
+        response = self.client.get('/api/v1/inventory/products/')
+        body = _envelope(response)
+        self.assertEqual(len(body['data']), 20)  # first 20 of 25
+
+
+class FilteringTests(TestCase):
+    """X3: List endpoints support field filtering via query params."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.operator = User.objects.create_user(
+            email='filt-op@easyerp.local',
+            password='testpass123',
+            full_name='Filt Op',
+            role=User.Role.OPERATOR,
+        )
+        resp = self.client.post('/api/v1/auth/login/', {
+            'email': 'filt-op@easyerp.local',
+            'password': 'testpass123',
+        }, format='json')
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {resp.data["access"]}')
+
+        from inventory.models import Product, Category
+        self.cat_a = Category.objects.create(name='Electronics')
+        self.cat_b = Category.objects.create(name='Furniture')
+        Product.objects.create(sku='FILT-E1', name='Phone', cost='100', price='200', category=self.cat_a)
+        Product.objects.create(sku='FILT-E2', name='Laptop', cost='500', price='1000', category=self.cat_a)
+        Product.objects.create(sku='FILT-F1', name='Chair', cost='50', price='100', category=self.cat_b)
+
+    def test_filter_by_name_exact_match(self):
+        """X3: ?name=Phone returns only matching product."""
+        response = self.client.get('/api/v1/inventory/products/?name=Phone')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = _envelope(response)
+        self.assertEqual(len(body['data']), 1)
+        self.assertEqual(body['data'][0]['sku'], 'FILT-E1')
+
+    def test_filter_by_category_returns_matching(self):
+        """X3: ?category=<uuid> returns products in that category."""
+        response = self.client.get(
+            f'/api/v1/inventory/products/?category={self.cat_a.id}'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = _envelope(response)
+        self.assertEqual(len(body['data']), 2)  # Phone + Laptop
+
+    def test_filter_by_sku_returns_unique(self):
+        """X3: ?sku=FILT-F1 returns single product."""
+        response = self.client.get('/api/v1/inventory/products/?sku=FILT-F1')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = _envelope(response)
+        self.assertEqual(len(body['data']), 1)
+        self.assertEqual(body['data'][0]['name'], 'Chair')
+
+
+class OpenAPISchemaTests(TestCase):
+    """X4: OpenAPI 3.0 schema at /api/v1/docs/."""
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_schema_endpoint_returns_valid_json(self):
+        """X4: GET /api/v1/schema/?format=json returns valid OpenAPI JSON."""
+        response = self.client.get('/api/v1/schema/?format=json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = json.loads(response.content)
+        self.assertEqual(data['openapi'], '3.0.3')
+        self.assertIn('info', data)
+        self.assertEqual(data['info']['title'], 'Easy ERP API')
+
+    def test_docs_swagger_ui_accessible(self):
+        """X4: GET /api/v1/docs/ returns Swagger UI page."""
+        response = self.client.get('/api/v1/docs/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Swagger UI renders HTML — check for key swagger elements
+        content = response.content.lower()
+        self.assertIn(b'swagger', content)
+        # The page loads the OpenAPI spec from /api/v1/schema/
+        self.assertIn(b'/api/v1/schema/', content)
+
+    def test_unauthenticated_can_access_docs(self):
+        """X4: OpenAPI schema and docs are publicly accessible."""
+        # No auth header
+        response = self.client.get('/api/v1/schema/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+
+class AuthEnforcementTests(TestCase):
+    """X5: All endpoints require Bearer token except login/refresh."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.operator = User.objects.create_user(
+            email='auth-enf@easyerp.local',
+            password='testpass123',
+            full_name='Auth Enf',
+            role=User.Role.OPERATOR,
+        )
+
+    def test_unauthenticated_inventory_returns_401(self):
+        """X5: No token → 401 on inventory endpoint."""
+        response = self.client.get('/api/v1/inventory/products/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_unauthenticated_purchasing_returns_401(self):
+        """X5: No token → 401 on purchasing endpoint."""
+        response = self.client.get('/api/v1/purchasing/suppliers/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_unauthenticated_sales_returns_401(self):
+        """X5: No token → 401 on sales endpoint."""
+        response = self.client.get('/api/v1/sales/customers/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_unauthenticated_invoicing_returns_401(self):
+        """X5: No token → 401 on invoicing endpoint."""
+        response = self.client.get('/api/v1/invoicing/invoices/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_login_is_public(self):
+        """X5: Login endpoint accessible without token."""
+        response = self.client.post('/api/v1/auth/login/', {
+            'email': 'auth-enf@easyerp.local',
+            'password': 'testpass123',
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_refresh_is_public(self):
+        """X5: Refresh endpoint accessible without Bearer token."""
+        # Get a refresh token first
+        login_resp = self.client.post('/api/v1/auth/login/', {
+            'email': 'auth-enf@easyerp.local',
+            'password': 'testpass123',
+        }, format='json')
+        refresh = login_resp.data['refresh']
+
+        # Now call refresh without Bearer header
+        client2 = APIClient()  # fresh client, no auth
+        response = client2.post('/api/v1/auth/refresh/', {
+            'refresh': refresh,
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', response.data)

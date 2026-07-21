@@ -8,10 +8,17 @@ Spec coverage:
   S3 — Fulfilling a sales order MUST decrement stock.
 """
 
+import json
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework import status
+
+
+def _envelope(response):
+    """Parse envelope-wrapped response body into {data, errors, meta}."""
+    return json.loads(response.content)
 
 from inventory.models import Product, Warehouse, StockLevel
 from sales.models import Customer, SalesOrder, SOLineItem
@@ -72,7 +79,8 @@ class CustomerCRUDTests(TestCase):
         Customer.objects.create(name='B Client', tax_id='T-B')
         response = self.client.get('/api/v1/sales/customers/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['count'], 2)
+        body = _envelope(response)
+        self.assertEqual(body['meta']['count'], 2)
 
     def test_retrieve_customer(self):
         """S1: GET detail → 200."""
