@@ -76,7 +76,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -119,10 +119,16 @@ async function fetchData() {
   }
 }
 
-onMounted(() => {
-  if (!isOwner.value) { navigateTo('/'); return }
-  fetchData()
-})
+// Wait for user to be loaded, then check ownership
+watch(() => user.value, (val) => {
+  if (val) {
+    if (!isOwner.value) {
+      navigateTo('/')
+    } else {
+      fetchData()
+    }
+  }
+}, { immediate: true })
 
 async function handleRoleChange(member: any) {
   if (!member._selectedRole || member._saving) return
