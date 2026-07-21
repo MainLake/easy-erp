@@ -39,6 +39,9 @@ class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all().order_by('name')
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticated, IsOperator]
+    filterset_fields = ['name', 'category', 'sku']
+    search_fields = ['name', 'sku']
+    ordering_fields = ['name', 'sku', 'price', 'created_at']
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve', 'stock'):

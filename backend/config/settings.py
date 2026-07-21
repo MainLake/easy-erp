@@ -20,11 +20,14 @@ INSTALLED_APPS = [
     # Third party
     'rest_framework',
     'rest_framework_simplejwt',
+    'django_filters',
+    'drf_spectacular',
     # Local apps
     'core',
     'inventory',
     'purchasing',
     'sales',
+    'invoicing',
 ]
 
 MIDDLEWARE = [
@@ -103,8 +106,27 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+    'DEFAULT_RENDERER_CLASSES': (
+        'core.renderers.EnvelopeRenderer',
+    ),
+    'EXCEPTION_HANDLER': 'core.exception_handler.envelope_exception_handler',
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend',
+        'rest_framework.filters.SearchFilter',
+        'rest_framework.filters.OrderingFilter',
+    ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+# drf-spectacular — OpenAPI 3.0 schema generation (spec X4)
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Easy ERP API',
+    'DESCRIPTION': 'REST API for Easy ERP — inventory, purchasing, sales, invoicing',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SCHEMA_PATH_PREFIX': '/api/v1/',
 }
 
 SIMPLE_JWT = {
