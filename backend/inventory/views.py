@@ -171,9 +171,16 @@ class StockMovementViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = StockMovementSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_permissions(self):
+        return [permissions.IsAuthenticated(), OrgRolePermission('inventory', 'read')]
+
     def get_queryset(self):
-        qs = StockMovement.objects.select_related('product', 'warehouse').order_by('-timestamp')
         org = getattr(self.request, 'organization', None)
-        if org:
-            qs = qs.filter(product__organization=org)
-        return qs
+        if org is None:
+            return StockMovement.objects.none()
+        return (
+            StockMovement.objects
+            .filter(product__organization=org)
+            .select_related('product', 'warehouse')
+            .order_by('-timestamp')
+        )
