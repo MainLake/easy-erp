@@ -209,6 +209,90 @@ class PurchaseOrderLifecycleTests(OrgTestMixin, TestCase):
         self.assertEqual(resend.status_code, status.HTTP_400_BAD_REQUEST)
 
 
+class PurchaseOrderAuthorshipTests(OrgTestMixin, TestCase):
+    """Authorship: created_by auto-populated, immutable, null-safe."""
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self.operator = self.create_org_user(
+            'po-author@easyerp.local',
+            full_name='Operator User',
+        )
+        self._login(self.client, self.operator)
+
+        self.supplier = Supplier.objects.create(
+            name='Author Supplier', tax_id='AUTH-TAX-001', organization=self.org,
+        )
+        self.product = Product.objects.create(
+            sku='AUTH-SKU-001', name='Gizmo', cost='5', price='10',
+            organization=self.org,
+        )
+
+    def _create_po(self, supplier, line_items=None, extra=None):
+        data = {'supplier': str(supplier.id)}
+        if line_items:
+            data['line_items_write'] = line_items
+        if extra:
+            data.update(extra)
+        return self.client.post(
+            '/api/v1/purchasing/orders/', data, format='json',
+        )
+
+    def test_create_purchase_order_sets_created_by(self):
+        """Authorship: created PO's created_by == authenticated user."""
+        response = self._create_po(self.supplier, [
+            {'product': str(self.product.id), 'quantity': 1, 'unit_cost': '5.00'},
+        ])
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['created_by'], self.operator.id)
+
+    def test_create_purchase_order_ignores_spoofed_created_by(self):
+        """Authorship: spoofed created_by in payload is ignored on create."""
+        other_user = self.create_org_user(
+            'po-other@easyerp.local', full_name='Other User',
+        )
+        response = self._create_po(self.supplier, [
+            {'product': str(self.product.id), 'quantity': 1, 'unit_cost': '5.00'},
+        ], extra={'created_by': str(other_user.id)})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        po = PurchaseOrder.objects.get(id=response.data['id'])
+        self.assertEqual(po.created_by_id, self.operator.id)
+
+    def test_patch_purchase_order_cannot_override_created_by(self):
+        """Authorship: created_by is immutable after creation via PATCH."""
+        create_resp = self._create_po(self.supplier, [
+            {'product': str(self.product.id), 'quantity': 1, 'unit_cost': '5.00'},
+        ])
+        po_id = create_resp.data['id']
+
+        other_user = self.create_org_user(
+            'po-patcher@easyerp.local', full_name='Patcher User',
+        )
+        patch_resp = self.client.patch(
+            f'/api/v1/purchasing/orders/{po_id}/',
+            {'created_by': str(other_user.id), 'notes': 'updated'},
+            format='json',
+        )
+        self.assertEqual(patch_resp.status_code, status.HTTP_200_OK)
+
+        po = PurchaseOrder.objects.get(id=po_id)
+        self.assertEqual(po.created_by_id, self.operator.id)
+
+    def test_null_created_by_order_lists_and_serializes_without_error(self):
+        """Authorship: legacy/null created_by renders created_by_name as None."""
+        PurchaseOrder.objects.create(
+            supplier=self.supplier, organization=self.org, created_by=None,
+        )
+        list_resp = self.client.get('/api/v1/purchasing/orders/')
+        self.assertEqual(list_resp.status_code, status.HTTP_200_OK)
+
+        po = PurchaseOrder.objects.filter(created_by__isnull=True).first()
+        detail_resp = self.client.get(f'/api/v1/purchasing/orders/{po.id}/')
+        self.assertEqual(detail_resp.status_code, status.HTTP_200_OK)
+        self.assertIsNone(detail_resp.data['created_by_name'])
+
+
 class PurchaseOrderReceiptTests(OrgTestMixin, TestCase):
     """P3: Receiving PO MUST increment stock for each line item."""
 

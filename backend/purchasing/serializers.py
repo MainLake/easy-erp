@@ -53,6 +53,7 @@ class POLineItemCreateSerializer(serializers.ModelSerializer):
 
 class PurchaseOrderSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(source='supplier.name', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
     line_items = POLineItemSerializer(many=True, read_only=True)
     line_items_write = POLineItemCreateSerializer(
         many=True, write_only=True, required=False,
@@ -63,9 +64,16 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'supplier', 'supplier_name', 'status',
             'order_date', 'notes', 'line_items', 'line_items_write',
+            'created_by', 'created_by_name',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'status', 'order_date', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'status', 'order_date', 'created_by',
+            'created_at', 'updated_at',
+        ]
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.full_name if obj.created_by else None
 
     def create(self, validated_data):
         line_items_data = validated_data.pop('line_items_write', [])

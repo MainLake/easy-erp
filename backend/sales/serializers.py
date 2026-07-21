@@ -55,6 +55,7 @@ class SOLineItemCreateSerializer(serializers.ModelSerializer):
 
 class SalesOrderSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source='customer.name', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
     line_items = SOLineItemSerializer(many=True, read_only=True)
     line_items_write = SOLineItemCreateSerializer(
         many=True, write_only=True, required=False,
@@ -65,9 +66,16 @@ class SalesOrderSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'customer', 'customer_name', 'status',
             'order_date', 'notes', 'line_items', 'line_items_write',
+            'created_by', 'created_by_name',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'status', 'order_date', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'status', 'order_date', 'created_by',
+            'created_at', 'updated_at',
+        ]
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.full_name if obj.created_by else None
 
     def create(self, validated_data):
         line_items_data = validated_data.pop('line_items_write', [])
