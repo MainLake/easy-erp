@@ -176,7 +176,7 @@ async function handleInvite() {
     const res = await request('/memberships/', {
       method: 'POST',
       body: JSON.stringify({
-        user_email: inviteEmail.value,
+        invite_email: inviteEmail.value,
         role: inviteRole.value,
       }),
     })

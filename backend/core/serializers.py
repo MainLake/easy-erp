@@ -127,13 +127,6 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'organization']
-        validators = [
-            UniqueTogetherValidator(
-                queryset=OrganizationMembership.objects.all(),
-                fields=['user', 'organization'],
-                message='This user already has a membership in this organization.',
-            ),
-        ]
 
     def get_user_name(self, obj):
         return obj.user.full_name if obj.user else None
