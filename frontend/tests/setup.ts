@@ -17,3 +17,29 @@ globalThis.localStorage = {
 })
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ;(globalThis as any).navigateTo = () => Promise.resolve()
+
+// Mock useAuth — simple stub for useApi dependency
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+;(globalThis as any).useAuth = () => ({
+  user: { value: null },
+  getAccessToken: () => null,
+  getRefreshToken: () => null,
+  tryRefresh: async () => false,
+  login: async () => {},
+  logout: () => {},
+  fetchUser: async () => {},
+  initAuth: async () => false,
+  switchOrg: async () => {},
+  register: async () => {},
+})
+
+// Mock useApi — thin wrapper that delegates to globalThis.fetch
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+;(globalThis as any).useApi = () => {
+  const config = (globalThis as any).useRuntimeConfig()
+  return {
+    request: async (endpoint: string, options?: RequestInit) => {
+      return fetch(`${config.public.apiBase}${endpoint}`, options || {})
+    },
+  }
+}

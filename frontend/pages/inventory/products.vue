@@ -33,7 +33,15 @@
       :initial-data="editing ?? undefined"
       @save="handleSave"
       @close="modalOpen = false"
-    />
+    >
+      <template #below-fields>
+        <DynamicFields
+          model-name="product"
+          :custom-fields="customFields"
+          @update:custom-fields="customFields = $event"
+        />
+      </template>
+    </CrudModal>
 
     <!-- Stock Management Modal -->
     <Teleport to="body">
@@ -110,6 +118,9 @@ const sortDir = ref<'asc' | 'desc'>('asc')
 // Modal state
 const modalOpen = ref(false)
 const editing = ref<any>(null)
+
+// Custom fields state
+const customFields = ref<Record<string, string>>({})
 
 // References for category select
 const categories = ref<any[]>([])
@@ -195,10 +206,15 @@ function changePage(p: number) { page.value = p; fetchData() }
 function handleSearch(q: string) { searchQuery.value = q; page.value = 1; fetchData() }
 function handleSort(key: string, dir: 'asc' | 'desc') { sortKey.value = key; sortDir.value = dir; fetchData() }
 
-function openCreate() { editing.value = null; modalOpen.value = true }
-function openEdit(row: any) { editing.value = { ...row }; modalOpen.value = true }
+function openCreate() { editing.value = null; customFields.value = {}; modalOpen.value = true }
+function openEdit(row: any) { editing.value = { ...row }; customFields.value = { ...(row.custom_fields ?? {}) }; modalOpen.value = true }
 
 async function handleSave(payload: Record<string, any>) {
+  // Merge custom_fields into the payload
+  if (Object.keys(customFields.value).length > 0) {
+    payload.custom_fields = { ...customFields.value }
+  }
+
   if (editing.value?.id) {
     const res = await request(`/inventory/products/${editing.value.id}/`, {
       method: 'PUT', body: JSON.stringify(payload),

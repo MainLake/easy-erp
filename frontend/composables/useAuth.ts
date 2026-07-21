@@ -23,6 +23,7 @@ export interface OrganizationRole {
 export interface OrganizationMembership {
   id: string
   is_default: boolean
+  is_owner: boolean
   organization: Organization
   role: OrganizationRole
 }

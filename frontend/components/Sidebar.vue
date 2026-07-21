@@ -30,7 +30,10 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+
 const route = useRoute()
+const { user } = useAuth()
 
 interface SidebarItem {
   to: string
@@ -43,36 +46,54 @@ interface SidebarSection {
   items: SidebarItem[]
 }
 
-const sections: SidebarSection[] = [
-  {
-    label: 'Inventario',
+const isOwner = computed(() => user.value?.active_membership?.is_owner ?? false)
+
+const settingsSection = computed<SidebarSection | null>(() => {
+  if (!isOwner.value) return null
+  return {
+    label: 'Configuración',
     items: [
-      { to: '/inventory/products', label: 'Productos', icon: '📦' },
-      { to: '/inventory/categories', label: 'Categorías', icon: '🏷️' },
-      { to: '/inventory/warehouses', label: 'Almacenes', icon: '🏭' },
+      { to: '/settings/custom-fields', label: 'Campos personalizados', icon: '⚙️' },
     ],
-  },
-  {
-    label: 'Compras',
-    items: [
-      { to: '/purchasing/suppliers', label: 'Proveedores', icon: '🚚' },
-      { to: '/purchasing/orders', label: 'Órdenes', icon: '📋' },
-    ],
-  },
-  {
-    label: 'Ventas',
-    items: [
-      { to: '/sales/customers', label: 'Clientes', icon: '👥' },
-      { to: '/sales/orders', label: 'Órdenes', icon: '📋' },
-    ],
-  },
-  {
-    label: 'Facturación',
-    items: [
-      { to: '/invoicing/invoices', label: 'Facturas', icon: '🧾' },
-    ],
-  },
-]
+  }
+})
+
+const sections = computed<SidebarSection[]>(() => {
+  const base: SidebarSection[] = [
+    {
+      label: 'Inventario',
+      items: [
+        { to: '/inventory/products', label: 'Productos', icon: '📦' },
+        { to: '/inventory/categories', label: 'Categorías', icon: '🏷️' },
+        { to: '/inventory/warehouses', label: 'Almacenes', icon: '🏭' },
+      ],
+    },
+    {
+      label: 'Compras',
+      items: [
+        { to: '/purchasing/suppliers', label: 'Proveedores', icon: '🚚' },
+        { to: '/purchasing/orders', label: 'Órdenes', icon: '📋' },
+      ],
+    },
+    {
+      label: 'Ventas',
+      items: [
+        { to: '/sales/customers', label: 'Clientes', icon: '👥' },
+        { to: '/sales/orders', label: 'Órdenes', icon: '📋' },
+      ],
+    },
+    {
+      label: 'Facturación',
+      items: [
+        { to: '/invoicing/invoices', label: 'Facturas', icon: '🧾' },
+      ],
+    },
+  ]
+  if (settingsSection.value) {
+    base.push(settingsSection.value)
+  }
+  return base
+})
 
 function isActive(path: string): boolean {
   if (path === '/') return route.path === '/'

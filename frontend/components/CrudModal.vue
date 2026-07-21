@@ -46,6 +46,7 @@
               class="form-input"
             />
           </div>
+          <slot name="below-fields" />
           <p v-if="error" class="form-error">{{ error }}</p>
           <div class="modal-footer">
             <button type="button" class="btn-cancel" @click="$emit('close')">Cancelar</button>

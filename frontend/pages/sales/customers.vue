@@ -28,7 +28,15 @@
       :initial-data="editing ?? undefined"
       @save="handleSave"
       @close="modalOpen = false"
-    />
+    >
+      <template #below-fields>
+        <DynamicFields
+          model-name="customer"
+          :custom-fields="customFields"
+          @update:custom-fields="customFields = $event"
+        />
+      </template>
+    </CrudModal>
   </div>
 </template>
 
@@ -48,6 +56,8 @@ const searchQuery = ref('')
 
 const modalOpen = ref(false)
 const editing = ref<any>(null)
+
+const customFields = ref<Record<string, string>>({})
 
 const columns = [
   { key: 'name', label: 'Nombre' },
@@ -83,10 +93,14 @@ onMounted(fetchData)
 function changePage(p: number) { page.value = p; fetchData() }
 function handleSearch(q: string) { searchQuery.value = q; page.value = 1; fetchData() }
 
-function openCreate() { editing.value = null; modalOpen.value = true }
-function openEdit(row: any) { editing.value = { ...row }; modalOpen.value = true }
+function openCreate() { editing.value = null; customFields.value = {}; modalOpen.value = true }
+function openEdit(row: any) { editing.value = { ...row }; customFields.value = { ...(row.custom_fields ?? {}) }; modalOpen.value = true }
 
 async function handleSave(payload: Record<string, any>) {
+  if (Object.keys(customFields.value).length > 0) {
+    payload.custom_fields = { ...customFields.value }
+  }
+
   if (editing.value?.id) {
     const res = await request(`/sales/customers/${editing.value.id}/`, {
       method: 'PUT', body: JSON.stringify(payload),

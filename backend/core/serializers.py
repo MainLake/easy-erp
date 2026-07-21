@@ -235,7 +235,7 @@ class OrganizationMembershipNestedSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrganizationMembership
-        fields = ['id', 'organization', 'role', 'is_default']
+        fields = ['id', 'organization', 'role', 'is_default', 'is_owner']
 
 
 class MeSerializer(UserSerializer):
