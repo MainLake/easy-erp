@@ -2,12 +2,11 @@
   <div class="page-container">
     <div class="page-header">
       <h1>Miembros</h1>
-      <button class="btn btn-primary" @click="openInvite">+ Agregar Miembro</button>
+      <button class="btn btn-primary" @click="showInvite = true">+ Agregar Miembro</button>
     </div>
 
     <div class="card">
       <div v-if="loading" class="table-loading">Cargando…</div>
-
       <div v-else class="table-responsive">
         <table class="data-table">
           <thead>
@@ -23,18 +22,16 @@
               <td>{{ m.user_name }}</td>
               <td>{{ m.user_email }}</td>
               <td>
-                <div class="role-cell">
-                  <select
-                    v-model="m._selectedRole"
-                    class="form-input form-input-sm role-select"
-                    :disabled="m._saving || m.user === currentUserId"
-                    @change="handleRoleChange(m)"
-                  >
-                    <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
-                  </select>
-                  <span v-if="m._saving" class="spinner" />
-                  <span v-if="m.user === currentUserId" class="self-hint" title="No podés cambiar tu propio rol">(vos)</span>
-                </div>
+                <select
+                  v-model="m._selectedRole"
+                  class="form-input form-input-sm"
+                  style="min-width:140px"
+                  :disabled="m._saving || m.user === currentUserId"
+                  @change="handleRoleChange(m)"
+                >
+                  <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
+                </select>
+                <span v-if="m._saving">…</span>
               </td>
               <td>
                 <span v-if="m.is_owner" class="badge badge-sent">Owner</span>
@@ -49,32 +46,29 @@
       </div>
     </div>
 
-    <!-- Invite Modal -->
+    <!-- Simple Invite -->
     <div v-if="showInvite" class="modal-overlay" @click.self="showInvite = false">
       <div class="modal-container">
         <div class="modal-header">
           <h3>Agregar Miembro</h3>
-          <button class="modal-close" @click="showInvite = false">×</button>
+          <button class="modal-close" @click="showInvite = false">&times;</button>
         </div>
         <div class="modal-body">
           <div class="form-group">
-            <label>Email del usuario</label>
-            <input v-model="inviteEmail" type="email" class="form-input" placeholder="usuario@ejemplo.com" />
+            <label>Email</label>
+            <input v-model="inviteEmail" class="form-input" placeholder="usuario@email.com" autocomplete="off" />
           </div>
           <div class="form-group">
             <label>Rol</label>
             <select v-model="inviteRole" class="form-input">
-              <option value="" disabled>Seleccionar rol</option>
               <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
             </select>
           </div>
           <p v-if="inviteError" class="form-error">{{ inviteError }}</p>
-        </div>
-        <div class="modal-footer">
-          <button class="btn-cancel" @click="showInvite = false">Cancelar</button>
-          <button class="btn-save" :disabled="inviteSaving" @click="handleInvite">
-            {{ inviteSaving ? 'Agregando…' : 'Agregar' }}
-          </button>
+          <div class="modal-footer">
+            <button class="btn-cancel" @click="showInvite = false">Cancelar</button>
+            <button class="btn-save" :disabled="saving" @click="doInvite">{{ saving ? 'Agregando…' : 'Agregar' }}</button>
+          </div>
         </div>
       </div>
     </div>
@@ -97,7 +91,7 @@ const showInvite = ref(false)
 const inviteEmail = ref('')
 const inviteRole = ref('')
 const inviteError = ref('')
-const inviteSaving = ref(false)
+const saving = ref(false)
 
 const isOwner = computed(() => user.value?.active_membership?.is_owner ?? false)
 const currentUserId = computed(() => user.value?.id)
@@ -105,35 +99,28 @@ const currentUserId = computed(() => user.value?.id)
 async function fetchData() {
   loading.value = true
   try {
-    const [membersRes, rolesRes] = await Promise.all([
+    const [mRes, rRes] = await Promise.all([
       request('/memberships/?page_size=200'),
       request('/roles/?page_size=200'),
     ])
-    const membersEnvelope = await membersRes.json()
-    const rolesEnvelope = await rolesRes.json()
-
-    roles.value = rolesEnvelope.data ?? rolesEnvelope.results ?? []
-
-    const membersData = membersEnvelope.data ?? membersEnvelope.results ?? []
-    members.value = membersData.map((m: any) => ({
+    const mEnv = await mRes.json()
+    const rEnv = await rRes.json()
+    roles.value = rEnv.data ?? rEnv.results ?? []
+    const data = mEnv.data ?? mEnv.results ?? []
+    members.value = data.map((m: any) => ({
       ...m,
-      user_name: m.user_name || '—',
-      user_email: m.user_email || '—',
       _selectedRole: m.role || '',
       _saving: false,
     }))
-  } catch (e: any) {
-    console.error('Failed to fetch members or roles:', e)
+  } catch (e) {
+    console.error(e)
   } finally {
     loading.value = false
   }
 }
 
 onMounted(() => {
-  if (!isOwner.value) {
-    navigateTo('/')
-    return
-  }
+  if (!isOwner.value) { navigateTo('/'); return }
   fetchData()
 })
 
@@ -147,31 +134,24 @@ async function handleRoleChange(member: any) {
     })
     if (!res.ok) {
       const e = await res.json()
-      alert(e.errors?.[0]?.message || 'Error al cambiar el rol')
+      alert(e.errors?.[0]?.message || 'Error')
       member._selectedRole = member.role
     }
   } catch (e: any) {
-    alert(e.message || 'Error al cambiar el rol')
+    alert(e.message)
     member._selectedRole = member.role
   } finally {
     member._saving = false
   }
 }
 
-function openInvite() {
-  inviteEmail.value = ''
-  inviteRole.value = roles.value[0]?.id || ''
-  inviteError.value = ''
-  showInvite.value = true
-}
-
-async function handleInvite() {
+async function doInvite() {
   inviteError.value = ''
   if (!inviteEmail.value || !inviteRole.value) {
     inviteError.value = 'Completá todos los campos.'
     return
   }
-  inviteSaving.value = true
+  saving.value = true
   try {
     const res = await request('/memberships/', {
       method: 'POST',
@@ -182,70 +162,40 @@ async function handleInvite() {
     })
     if (!res.ok) {
       const e = await res.json()
-      throw new Error(e.errors?.[0]?.message || e.detail || 'Error al agregar miembro')
+      throw new Error(e.errors?.[0]?.message || 'Error')
     }
     showInvite.value = false
+    inviteEmail.value = ''
+    inviteRole.value = ''
     await fetchData()
   } catch (e: any) {
     inviteError.value = e.message
   } finally {
-    inviteSaving.value = false
+    saving.value = false
   }
 }
 </script>
 
 <style scoped>
-.page-container {
-  padding: 1.5rem 2rem;
-  max-width: 1100px;
-}
-
-.table-loading {
-  padding: 2rem;
-  text-align: center;
-  color: var(--color-muted);
-}
-
-.table-responsive {
-  overflow-x: auto;
-}
-
-.role-select {
-  min-width: 150px;
-}
-
-.role-cell {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.self-hint {
-  font-size: 0.75rem;
-  color: var(--color-muted);
-  cursor: help;
-  white-space: nowrap;
-}
-
-.empty-row {
-  text-align: center;
-  color: var(--color-muted);
-  padding: 2rem;
-}
-
-.spinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--color-border);
-  border-top-color: var(--color-primary);
-  border-radius: 50%;
-  animation: spin 0.5s linear infinite;
-  margin-left: 0.5rem;
-  vertical-align: middle;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
+.page-container { padding: 1.5rem 2rem; max-width: 1100px; }
+.table-loading { padding: 2rem; text-align: center; color: var(--color-muted); }
+.table-responsive { overflow-x: auto; }
+.empty-row { text-align: center; color: var(--color-muted); padding: 2rem; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-container { background: #fff; border-radius: 8px; width: 90%; max-width: 450px; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; border-bottom: 1px solid #eee; }
+.modal-header h3 { margin: 0; }
+.modal-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; }
+.modal-body { padding: 1.5rem; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #eee; }
+.form-group { margin-bottom: 1rem; }
+.form-group label { display: block; margin-bottom: 0.25rem; font-weight: 500; }
+.form-input { width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9rem; box-sizing: border-box; }
+.form-error { color: #d32f2f; font-size: 0.85rem; margin-top: 0.5rem; }
+.btn-cancel { padding: 0.5rem 1rem; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; }
+.btn-save { padding: 0.5rem 1.25rem; border: none; border-radius: 4px; background: #4F46E5; color: #fff; cursor: pointer; }
+.btn-save:disabled { opacity: 0.6; }
+.badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 10px; font-size: 0.7rem; font-weight: 600; }
+.badge-sent { background: #dbeafe; color: #1d4ed8; }
+.text-muted { color: #999; }
 </style>
