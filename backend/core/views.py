@@ -1,10 +1,13 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Branch, Organization, OrganizationMembership, Role, User
 from .serializers import (
     BranchSerializer,
+    MeSerializer,
     OrganizationMembershipSerializer,
     OrganizationSerializer,
     RoleSerializer,
@@ -22,6 +25,12 @@ class UserViewSet(viewsets.ModelViewSet):
 
     queryset = User.objects.all().order_by('-created_at')
     serializer_class = UserSerializer
+
+    def get_serializer_class(self):
+        """Use MeSerializer for /users/me/ so the response includes memberships."""
+        if self.action == 'me':
+            return MeSerializer
+        return UserSerializer
 
     def get_permissions(self):
         if self.action == 'me':
@@ -153,3 +162,56 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Assign the request org to the new membership."""
         serializer.save(organization=self.request.organization)
+
+
+class SwitchOrgView(APIView):
+    """Switch the user's active organization and return fresh JWT tokens.
+
+    POST /api/v1/auth/switch-org/
+    Body: {"organization_id": "<UUID>"}
+
+    Validates the user is a member of the requested organization, then
+    issues a new access+refresh token pair with ``active_organization_id``
+    set to the target org (spec A5).
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        organization_id = request.data.get('organization_id')
+
+        if not organization_id:
+            return Response(
+                {
+                    'data': None,
+                    'errors': [{
+                        'code': 'bad_request',
+                        'message': 'organization_id es requerido',
+                    }],
+                    'meta': {},
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not OrganizationMembership.all_objects.filter(
+            user=request.user, organization_id=organization_id,
+        ).exists():
+            return Response(
+                {
+                    'data': None,
+                    'errors': [{
+                        'code': 'not_member',
+                        'message': 'No sos miembro de esta organización',
+                    }],
+                    'meta': {},
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        refresh = RefreshToken.for_user(request.user)
+        refresh['active_organization_id'] = str(organization_id)
+
+        return Response({
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+        })
