@@ -109,6 +109,18 @@ def transfer_stock(*, product_id, from_warehouse_id, to_warehouse_id, quantity, 
         from_warehouse = Warehouse.objects.select_for_update().get(id=from_warehouse_id)
         to_warehouse = Warehouse.objects.select_for_update().get(id=to_warehouse_id)
 
+        # --- same-org validation (spec I3) ---
+        if from_warehouse.organization_id != to_warehouse.organization_id:
+            raise ValidationError({
+                'to_warehouse_id': (
+                    f'Cross-organization transfers are not allowed. '
+                    f'{from_warehouse.name} belongs to org '
+                    f'{from_warehouse.organization_id}, but '
+                    f'{to_warehouse.name} belongs to org '
+                    f'{to_warehouse.organization_id}.'
+                ),
+            })
+
         # --- remove from source ---
         try:
             source_level = StockLevel.objects.select_for_update().get(

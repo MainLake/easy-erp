@@ -3,9 +3,15 @@ Invoicing service layer — invoice generation and credit/debit notes.
 
 Cross-app integration:
   generate_invoice() — validates SO is fulfilled, then creates invoice
-    with sequential numbering using select_for_update() on Organization.
+    with sequential numbering using select_for_update() on the per-org
+    invoicing Organization row.
   generate_credit_note() / generate_debit_note() — creates a note linked
     to an existing invoice with separate sequential numbering.
+
+Multi-org (spec B3): invoice numbering is sequential *per organization*.
+Each core Organization has its own invoicing Organization row with
+independent sequencing counters.  The caller (ViewSet) must pass the
+active ``core_organization_id`` when generating an invoice.
 """
 
 from datetime import date
@@ -32,24 +38,38 @@ def _format_debit_note_number(number: int) -> str:
     return f'DN-{number:03d}'
 
 
-def _get_or_create_organization() -> Organization:
-    """Return the single Organization for MVP (creates a default if missing)."""
-    org = Organization.objects.first()
+def _get_or_create_invoicing_org(core_organization_id) -> Organization:
+    """Return the invoicing Organization row for *core_organization_id*,
+    creating one with default sequencing counters if none exists."""
+    org = Organization.objects.filter(
+        core_organization_id=core_organization_id,
+    ).first()
     if org is None:
+        # Fetch the core org to copy its name / tax_id into the invoicing row.
+        from core.models import Organization as CoreOrg
+
+        core_org = CoreOrg.objects.get(id=core_organization_id)
         org = Organization.objects.create(
-            name='Default Organization',
-            tax_id='DEFAULT-TAX-ID',
+            name=core_org.name,
+            tax_id=core_org.tax_id,
+            core_organization=core_org,
+            last_invoice_number=0,
+            next_credit_note_number=1,
+            next_debit_note_number=1,
         )
     return org
 
 
-def generate_invoice(*, sales_order_id) -> Invoice:
+def generate_invoice(*, sales_order_id, core_organization_id=None) -> Invoice:
     """Generate an invoice from a fulfilled sales order.
 
     Requirements (spec B1, B3):
       - Only fulfilled SOs can be invoiced. Non-fulfilled → ValidationError.
-      - Sequential numbering via select_for_update() on Organization.
+      - Sequential numbering **per organization** via select_for_update()
+        on the per-org invoicing Organization row.
       - Invoice total is computed from SO line items (quantity × unit_price).
+      - ``core_organization_id`` selects which org's sequencing counters to use.
+        If omitted, falls back to the SO's organization (when set).
 
     Returns the created Invoice.
     """
@@ -70,11 +90,20 @@ def generate_invoice(*, sales_order_id) -> Invoice:
                 ),
             })
 
-        # Lock and increment the sequential invoice number (B3 spec)
-        org = (_get_or_create_organization()
-               if not Organization.objects.select_for_update().exists()
-               else Organization.objects.select_for_update().first())
-        org = Organization.objects.select_for_update().get(id=org.id)
+        # Resolve the core organization for sequencing.
+        if core_organization_id is None:
+            if so.organization_id is None:
+                raise ValidationError({
+                    'core_organization_id': (
+                        'Sales order has no organization assigned and no '
+                        'core_organization_id was provided.'
+                    ),
+                })
+            core_organization_id = so.organization_id
+
+        # Lock and increment the per-org sequential invoice number (B3 spec).
+        invoicing_org = _get_or_create_invoicing_org(core_organization_id)
+        org = Organization.objects.select_for_update().get(id=invoicing_org.id)
         org.last_invoice_number += 1
         org.save()
 
@@ -86,6 +115,7 @@ def generate_invoice(*, sales_order_id) -> Invoice:
 
         invoice = Invoice.objects.create(
             organization=org,
+            core_organization_id=core_organization_id,
             number=_format_invoice_number(org.last_invoice_number),
             sales_order=so,
             customer=so.customer,
@@ -100,8 +130,8 @@ def generate_invoice(*, sales_order_id) -> Invoice:
 def generate_credit_note(*, invoice_id: str, amount, reason: str) -> CreditDebitNote:
     """Generate a credit note linked to an existing invoice.
 
-    Uses the Organization's separate credit note sequence number.
-    Amount is stored as a positive decimal (the note expresses credit).
+    Uses the issuing entity's separate credit note sequence number
+    (per-org).  Amount is stored as a positive decimal.
     """
     with transaction.atomic():
         try:
@@ -116,13 +146,16 @@ def generate_credit_note(*, invoice_id: str, amount, reason: str) -> CreditDebit
                 'amount': 'Amount must be greater than zero.',
             })
 
-        org = Organization.objects.select_for_update().get(id=invoice.organization_id)
+        org = Organization.objects.select_for_update().get(
+            id=invoice.organization_id,
+        )
         note_number = org.next_credit_note_number
         org.next_credit_note_number += 1
         org.save()
 
         note = CreditDebitNote.objects.create(
             invoice=invoice,
+            organization_id=invoice.core_organization_id,
             type=CreditDebitNote.NoteType.CREDIT,
             amount=amount,
             reason=reason,
@@ -135,8 +168,8 @@ def generate_credit_note(*, invoice_id: str, amount, reason: str) -> CreditDebit
 def generate_debit_note(*, invoice_id: str, amount, reason: str) -> CreditDebitNote:
     """Generate a debit note linked to an existing invoice.
 
-    Uses the Organization's separate debit note sequence number.
-    Amount is stored as a positive decimal (the note expresses debit).
+    Uses the issuing entity's separate debit note sequence number
+    (per-org).  Amount is stored as a positive decimal.
     """
     with transaction.atomic():
         try:
@@ -151,13 +184,16 @@ def generate_debit_note(*, invoice_id: str, amount, reason: str) -> CreditDebitN
                 'amount': 'Amount must be greater than zero.',
             })
 
-        org = Organization.objects.select_for_update().get(id=invoice.organization_id)
+        org = Organization.objects.select_for_update().get(
+            id=invoice.organization_id,
+        )
         note_number = org.next_debit_note_number
         org.next_debit_note_number += 1
         org.save()
 
         note = CreditDebitNote.objects.create(
             invoice=invoice,
+            organization_id=invoice.core_organization_id,
             type=CreditDebitNote.NoteType.DEBIT,
             amount=amount,
             reason=reason,
