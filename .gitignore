@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.env
+venv/
+.venv/
+*.log
+
+# Django
+media/
+staticfiles/
+
+# Node
+node_modules/
+.nuxt/
+.output/
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
