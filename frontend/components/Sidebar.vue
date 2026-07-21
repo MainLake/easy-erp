@@ -34,6 +34,7 @@ import { computed } from 'vue'
 
 const route = useRoute()
 const { user } = useAuth()
+const { hasPermission } = usePermission()
 
 interface SidebarItem {
   to: string
@@ -43,25 +44,17 @@ interface SidebarItem {
 
 interface SidebarSection {
   label: string
+  module: string
   items: SidebarItem[]
 }
 
 const isOwner = computed(() => user.value?.active_membership?.is_owner ?? false)
 
-const settingsSection = computed<SidebarSection | null>(() => {
-  if (!isOwner.value) return null
-  return {
-    label: 'Configuración',
-    items: [
-      { to: '/settings/custom-fields', label: 'Campos personalizados', icon: '⚙️' },
-    ],
-  }
-})
-
-const sections = computed<SidebarSection[]>(() => {
+const allSections = computed<SidebarSection[]>(() => {
   const base: SidebarSection[] = [
     {
       label: 'Inventario',
+      module: 'inventory',
       items: [
         { to: '/inventory/products', label: 'Productos', icon: '📦' },
         { to: '/inventory/categories', label: 'Categorías', icon: '🏷️' },
@@ -70,6 +63,7 @@ const sections = computed<SidebarSection[]>(() => {
     },
     {
       label: 'Compras',
+      module: 'purchasing',
       items: [
         { to: '/purchasing/suppliers', label: 'Proveedores', icon: '🚚' },
         { to: '/purchasing/orders', label: 'Órdenes', icon: '📋' },
@@ -77,6 +71,7 @@ const sections = computed<SidebarSection[]>(() => {
     },
     {
       label: 'Ventas',
+      module: 'sales',
       items: [
         { to: '/sales/customers', label: 'Clientes', icon: '👥' },
         { to: '/sales/orders', label: 'Órdenes', icon: '📋' },
@@ -84,15 +79,36 @@ const sections = computed<SidebarSection[]>(() => {
     },
     {
       label: 'Facturación',
+      module: 'invoicing',
       items: [
         { to: '/invoicing/invoices', label: 'Facturas', icon: '🧾' },
       ],
     },
   ]
-  if (settingsSection.value) {
-    base.push(settingsSection.value)
+
+  if (isOwner.value) {
+    base.push({
+      label: 'Configuración',
+      module: 'core',
+      items: [
+        { to: '/settings/custom-fields', label: 'Campos personalizados', icon: '⚙️' },
+        { to: '/settings/roles', label: 'Roles y permisos', icon: '🔐' },
+        { to: '/settings/members', label: 'Miembros', icon: '👤' },
+      ],
+    })
   }
+
   return base
+})
+
+const sections = computed<SidebarSection[]>(() => {
+  return allSections.value
+    .map(section => {
+      // Users without permissions map see nothing — safe fallback
+      const visibleItems = section.items.filter(() => hasPermission(section.module, 'read'))
+      return { ...section, items: visibleItems }
+    })
+    .filter(section => section.items.length > 0)
 })
 
 function isActive(path: string): boolean {

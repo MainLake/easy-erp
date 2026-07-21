@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <h1>Productos</h1>
-      <button class="btn btn-primary" @click="openCreate">+ Nuevo Producto</button>
+      <button v-if="hasPermission('inventory', 'write')" class="btn btn-primary" @click="openCreate">+ Nuevo Producto</button>
     </div>
 
     <DataTable
@@ -20,8 +20,8 @@
       <template #cell-price="{ value }">${{ Number(value).toFixed(2) }}</template>
       <template #cell-category="{ value }">{{ categoryMap[value] || value }}</template>
       <template #actions="{ row }">
-        <button class="btn-sm" @click="openEdit(row)">Editar</button>
-        <button class="btn-sm btn-sm-action" @click="openStock(row)">Existencia</button>
+        <button v-if="hasPermission('inventory', 'write')" class="btn-sm" @click="openEdit(row)">Editar</button>
+        <button v-if="hasPermission('inventory', 'write')" class="btn-sm btn-sm-action" @click="openStock(row)">Existencia</button>
       </template>
     </DataTable>
 
@@ -104,6 +104,7 @@ import { ref, computed, onMounted } from 'vue'
 definePageMeta({ middleware: 'auth' })
 
 const { request } = useApi()
+const { hasPermission } = usePermission()
 
 // ---- state ----
 const items = ref<any[]>([])

@@ -18,6 +18,7 @@ export interface Organization {
 export interface OrganizationRole {
   id: string
   name: string
+  permissions?: Record<string, string[]>
 }
 
 export interface OrganizationMembership {

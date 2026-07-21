@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <h1>Facturas</h1>
-      <button class="btn btn-primary" @click="openGenerate">+ Generar Factura</button>
+      <button v-if="hasPermission('invoicing', 'write')" class="btn btn-primary" @click="openGenerate">+ Generar Factura</button>
     </div>
 
     <DataTable
@@ -102,6 +102,7 @@ import { ref, onMounted, reactive } from 'vue'
 definePageMeta({ middleware: 'auth' })
 
 const { request } = useApi()
+const { hasPermission } = usePermission()
 
 const items = ref<any[]>([])
 const loading = ref(false)

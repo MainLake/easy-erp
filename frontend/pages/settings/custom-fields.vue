@@ -19,7 +19,7 @@
 
     <!-- Add new field button -->
     <div class="toolbar">
-      <button class="btn btn-primary" @click="openCreate">+ Nuevo Campo</button>
+      <button v-if="hasPermission('core', 'write')" class="btn btn-primary" @click="openCreate">+ Nuevo Campo</button>
     </div>
 
     <!-- Fields table -->
@@ -42,8 +42,8 @@
           <td>{{ f.field_type === 'select' ? (f.options ?? []).join(', ') : '—' }}</td>
           <td>{{ f.order }}</td>
           <td class="td-actions">
-            <button class="btn-sm" @click="openEdit(f)">Editar</button>
-            <button class="btn-sm btn-sm-danger" @click="handleDelete(f)">Eliminar</button>
+            <button v-if="hasPermission('core', 'write')" class="btn-sm" @click="openEdit(f)">Editar</button>
+            <button v-if="hasPermission('core', 'admin')" class="btn-sm btn-sm-danger" @click="handleDelete(f)">Eliminar</button>
           </td>
         </tr>
       </tbody>
@@ -115,6 +115,7 @@ definePageMeta({ middleware: 'auth' })
 
 const { request } = useApi()
 const { user } = useAuth()
+const { hasPermission } = usePermission()
 
 const models = [
   { value: 'product', label: 'Productos' },

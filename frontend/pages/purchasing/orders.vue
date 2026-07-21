@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <h1>Órdenes de Compra</h1>
-      <button class="btn btn-primary" @click="openCreate">+ Nueva OC</button>
+      <button v-if="hasPermission('purchasing', 'write')" class="btn btn-primary" @click="openCreate">+ Nueva OC</button>
     </div>
 
     <DataTable
@@ -22,8 +22,8 @@
       <template #cell-order_date="{ value }">{{ new Date(value).toLocaleDateString() }}</template>
       <template #actions="{ row }">
         <button class="btn-sm" @click="openView(row)">Ver</button>
-        <button v-if="row.status === 'draft'" class="btn-sm btn-sm-action" @click="handleSend(row)">Enviar</button>
-        <button v-if="row.status === 'sent'" class="btn-sm btn-sm-action" @click="handleReceive(row)">Recibir</button>
+        <button v-if="row.status === 'draft' && hasPermission('purchasing', 'write')" class="btn-sm btn-sm-action" @click="handleSend(row)">Enviar</button>
+        <button v-if="row.status === 'sent' && hasPermission('purchasing', 'write')" class="btn-sm btn-sm-action" @click="handleReceive(row)">Recibir</button>
       </template>
     </DataTable>
 
@@ -114,6 +114,7 @@ import { ref, onMounted, reactive } from 'vue'
 definePageMeta({ middleware: 'auth' })
 
 const { request } = useApi()
+const { hasPermission } = usePermission()
 
 const items = ref<any[]>([])
 const loading = ref(false)
