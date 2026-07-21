@@ -152,6 +152,15 @@ CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',
 ]
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_HEADERS = list(__import__('corsheaders.defaults').default_headers) + [
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
     'x-organization',
 ]
