@@ -443,3 +443,244 @@ class AuthEnforcementTests(TestCase):
         }, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('access', response.data)
+
+
+# =============================================================================
+# Registration tests — org-owner-role (spec R1-R9)
+# =============================================================================
+
+
+class RegistrationTests(TestCase):
+    """Self-service registration endpoint tests."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.url = '/api/v1/auth/register/'
+
+    # --- Happy Path (R1, R7) ---
+
+    def test_register_happy_path_returns_201_with_tokens(self):
+        """R1, R7: Valid registration → 201 with access and refresh tokens."""
+        response = self.client.post(self.url, {
+            'email': 'newuser@test.com',
+            'password': 'Pass1234',
+            'full_name': 'New User',
+            'org_name': 'My New Company',
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        body = _envelope(response)
+        self.assertIsNotNone(body['data'])
+        self.assertIn('access', body['data'])
+        self.assertIn('refresh', body['data'])
+        self.assertEqual(body['errors'], [])
+
+    def test_register_creates_user_org_role_membership(self):
+        """R1: Registration creates User, Organization, Role, Membership."""
+        self.client.post(self.url, {
+            'email': 'full@test.com',
+            'password': 'Pass1234',
+            'full_name': 'Full Person',
+            'org_name': 'Full Company',
+        }, format='json')
+
+        from core.models import User, Organization, Role, OrganizationMembership
+        user = User.objects.get(email='full@test.com')
+        self.assertEqual(user.full_name, 'Full Person')
+
+        org = Organization.objects.get(name='Full Company')
+        self.assertEqual(org.tax_id, 'Full Company')
+
+        role = Role.objects.get(organization=org, name='Admin')
+        self.assertEqual(role.permissions, {'*': ['admin']})
+
+        membership = OrganizationMembership.all_objects.get(user=user, organization=org)
+        self.assertTrue(membership.is_owner)
+        self.assertTrue(membership.is_default)
+        self.assertEqual(membership.role, role)
+
+    def test_register_jwt_has_active_organization_claim(self):
+        """R7: JWT access token includes active_organization_id claim."""
+        from core.models import Organization
+
+        self.client.post(self.url, {
+            'email': 'claim@test.com',
+            'password': 'Pass1234',
+            'full_name': 'Claim User',
+            'org_name': 'Claim Org',
+        }, format='json')
+
+        org = Organization.objects.get(name='Claim Org')
+
+        # Login and verify claim is in the token
+        login_resp = self.client.post('/api/v1/auth/login/', {
+            'email': 'claim@test.com',
+            'password': 'Pass1234',
+        }, format='json')
+        body = _envelope(login_resp)
+        import jwt
+        token = body['data']['access']
+        payload = jwt.decode(token, options={'verify_signature': False})
+        self.assertEqual(payload['active_organization_id'], str(org.id))
+
+    # --- Duplicate Email (R2) ---
+
+    def test_register_duplicate_email_returns_409(self):
+        """R2: Duplicate email → 409 Conflict."""
+        from core.models import User
+        User.objects.create_user(email='dup@test.com', password='Pass1234', full_name='First')
+
+        response = self.client.post(self.url, {
+            'email': 'dup@test.com',
+            'password': 'Pass1234',
+            'full_name': 'Second User',
+            'org_name': 'Second Org',
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        body = _envelope(response)
+        self.assertIsNone(body['data'])
+        error = body['errors'][0]
+        self.assertEqual(error['code'], 'conflict')
+        self.assertEqual(error['field'], 'email')
+
+    # --- Duplicate Org Name (R3) ---
+
+    def test_register_duplicate_org_name_returns_409(self):
+        """R3: Duplicate org name → 409 Conflict."""
+        from core.models import Organization
+        Organization.objects.create(name='Acme Inc', tax_id='TAX-999')
+
+        response = self.client.post(self.url, {
+            'email': 'new@test.com',
+            'password': 'Pass1234',
+            'full_name': 'New User',
+            'org_name': 'Acme Inc',
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        body = _envelope(response)
+        error = body['errors'][0]
+        self.assertEqual(error['code'], 'conflict')
+        self.assertEqual(error['field'], 'org_name')
+
+    def test_register_duplicate_tax_id_returns_409(self):
+        """R3: Duplicate tax_id → 409 Conflict."""
+        from core.models import Organization
+        Organization.objects.create(name='First Corp', tax_id='TAX-SHARED')
+
+        response = self.client.post(self.url, {
+            'email': 'new@test.com',
+            'password': 'Pass1234',
+            'full_name': 'New User',
+            'org_name': 'Second Corp',
+            'org_tax_id': 'TAX-SHARED',
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        body = _envelope(response)
+        error = body['errors'][0]
+        self.assertEqual(error['code'], 'conflict')
+        self.assertEqual(error['field'], 'org_tax_id')
+
+    # --- Missing Required Fields (R4) ---
+
+    def test_register_missing_fields_returns_400(self):
+        """R4: Missing required fields → 400 with field-level errors."""
+        response = self.client.post(self.url, {
+            'email': 'test@test.com',
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        body = _envelope(response)
+        self.assertIsNone(body['data'])
+        # Should have errors for password, full_name, org_name
+        error_fields = {e['field'] for e in body['errors']}
+        self.assertIn('password', error_fields)
+        self.assertIn('full_name', error_fields)
+        self.assertIn('org_name', error_fields)
+
+    # --- Weak Password (R5) ---
+
+    def test_register_password_all_digits_returns_400(self):
+        """R5: Password with only digits → 400."""
+        response = self.client.post(self.url, {
+            'email': 'test@test.com',
+            'password': '12345678',
+            'full_name': 'Test',
+            'org_name': 'Test Org',
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        body = _envelope(response)
+        error = body['errors'][0]
+        self.assertEqual(error['field'], 'password')
+
+    def test_register_password_all_letters_returns_400(self):
+        """R5: Password with only letters → 400."""
+        response = self.client.post(self.url, {
+            'email': 'test@test.com',
+            'password': 'abcdefgh',
+            'full_name': 'Test',
+            'org_name': 'Test Org',
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        body = _envelope(response)
+        error = body['errors'][0]
+        self.assertEqual(error['field'], 'password')
+
+    def test_register_password_too_short_returns_400(self):
+        """R5: Password < 8 chars → 400."""
+        response = self.client.post(self.url, {
+            'email': 'test@test.com',
+            'password': 'Ab1',
+            'full_name': 'Test',
+            'org_name': 'Test Org',
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    # --- Invalid Email (R6) ---
+
+    def test_register_invalid_email_returns_400(self):
+        """R6: Invalid email format → 400."""
+        response = self.client.post(self.url, {
+            'email': 'not-an-email',
+            'password': 'Pass1234',
+            'full_name': 'Test',
+            'org_name': 'Test Org',
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        body = _envelope(response)
+        error = body['errors'][0]
+        self.assertEqual(error['field'], 'email')
+
+    # --- No Authentication Required (R9) ---
+
+    def test_register_endpoint_is_public(self):
+        """R9: Registration does not require authentication."""
+        response = self.client.post(self.url, {
+            'email': 'public@test.com',
+            'password': 'Pass1234',
+            'full_name': 'Public User',
+            'org_name': 'Public Org',
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    # --- Optional tax_id ---
+
+    def test_register_without_tax_id_uses_org_name(self):
+        """Registration without org_tax_id → tax_id defaults to org_name."""
+        from core.models import Organization
+
+        self.client.post(self.url, {
+            'email': 'notax@test.com',
+            'password': 'Pass1234',
+            'full_name': 'No Tax',
+            'org_name': 'NoTax Co',
+        }, format='json')
+
+        org = Organization.objects.get(name='NoTax Co')
+        self.assertEqual(org.tax_id, 'NoTax Co')

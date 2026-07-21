@@ -1,3 +1,5 @@
+import re
+
 from django.core.validators import ValidationError
 from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
@@ -18,16 +20,39 @@ class UserSerializer(serializers.ModelSerializer):
     Password is write-only and never exposed in responses.
     """
 
+    password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        required=False,
+        help_text='User password (write-only).',
+    )
+
     class Meta:
         model = User
         fields = [
-            'id', 'email', 'full_name',
+            'id', 'email', 'full_name', 'password',
             'is_active', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
         extra_kwargs = {
             'email': {'required': True},
         }
+
+    def create(self, validated_data):
+        password = validated_data.pop('password', None)
+        user = super().create(validated_data)
+        if password:
+            user.set_password(password)
+            user.save(update_fields=['password'])
+        return user
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
+        user = super().update(instance, validated_data)
+        if password:
+            user.set_password(password)
+            user.save(update_fields=['password'])
+        return user
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +69,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
         model = Organization
         fields = [
             'id', 'name', 'tax_id', 'is_active', 'settings',
+            'legal_name', 'tax_regime', 'fiscal_address',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -103,7 +129,7 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
         model = OrganizationMembership
         fields = [
             'id', 'user', 'organization', 'role',
-            'is_default', 'is_active',
+            'is_default', 'is_active', 'is_owner',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'organization']
@@ -114,6 +140,82 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
                 message='This user already has a membership in this organization.',
             ),
         ]
+
+
+# ---------------------------------------------------------------------------
+# RegisterSerializer — self-service signup (spec R1-R9)
+# ---------------------------------------------------------------------------
+
+
+class RegisterSerializer(serializers.Serializer):
+    """Validates and creates a new user + organization in one atomic step.
+
+    Fields:
+        email       — RFC 5322, unique
+        password    — ≥8 chars, ≥1 letter, ≥1 digit
+        full_name   — max 255
+        org_name    — max 255, unique
+        org_tax_id  — optional, unique if provided
+
+    The actual creation happens in RegisterView (transaction.atomic),
+    not here — this serializer only validates input.
+    """
+
+    email = serializers.EmailField(required=True)
+    password = serializers.CharField(
+        required=True,
+        write_only=True,
+        min_length=8,
+    )
+    full_name = serializers.CharField(required=True, max_length=255)
+    org_name = serializers.CharField(required=True, max_length=255)
+    org_tax_id = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=50,
+    )
+
+    def validate_password(self, value):
+        """Password must have ≥1 letter and ≥1 digit (spec R5)."""
+        if not re.search(r'[A-Za-z]', value):
+            raise serializers.ValidationError(
+                'Password must contain at least one letter and one digit.',
+            )
+        if not re.search(r'\d', value):
+            raise serializers.ValidationError(
+                'Password must contain at least one letter and one digit.',
+            )
+        return value
+
+    def validate(self, data):
+        """Cross-field uniqueness checks (spec R2/R3).
+
+        Uses ``code='conflict'`` on ValidationError so the view can
+        detect 409 vs 400 based on error codes.
+        """
+        email = data.get('email')
+        org_name = data.get('org_name')
+        org_tax_id = data.get('org_tax_id')
+
+        if email and User.objects.filter(email=email).exists():
+            raise serializers.ValidationError(
+                {'email': 'A user with this email already exists.'},
+                code='conflict',
+            )
+
+        if org_name and Organization.objects.filter(name=org_name).exists():
+            raise serializers.ValidationError(
+                {'org_name': 'An organization with this name already exists.'},
+                code='conflict',
+            )
+
+        if org_tax_id and Organization.objects.filter(tax_id=org_tax_id).exists():
+            raise serializers.ValidationError(
+                {'org_tax_id': 'An organization with this tax ID already exists.'},
+                code='conflict',
+            )
+
+        return data
 
 
 # ---------------------------------------------------------------------------

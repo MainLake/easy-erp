@@ -4,16 +4,82 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from django.db import transaction
+
 from .models import Branch, Organization, OrganizationMembership, Role, User
 from .serializers import (
     BranchSerializer,
     MeSerializer,
     OrganizationMembershipSerializer,
     OrganizationSerializer,
+    RegisterSerializer,
     RoleSerializer,
     UserSerializer,
 )
-from .permissions import OrgRolePermission
+from .permissions import IsOrgOwner, OrgRolePermission
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _register_error_response(errors):
+    """Convert RegisterSerializer errors to the API envelope.
+
+    If any error has code='conflict', the HTTP status is 409;
+    otherwise 400 (spec R2/R3).
+    """
+    is_conflict = False
+    formatted = []
+
+    for field, messages in errors.items():
+        if isinstance(messages, list):
+            for msg in messages:
+                if hasattr(msg, 'code') and msg.code == 'conflict':
+                    is_conflict = True
+                else:
+                    code = getattr(msg, 'code', 'bad_request')
+                    if code == 'conflict':
+                        is_conflict = True
+                formatted.append({
+                    'code': getattr(msg, 'code', 'bad_request'),
+                    'field': field,
+                    'message': str(msg),
+                })
+        else:
+            code = getattr(messages, 'code', 'bad_request')
+            if code == 'conflict':
+                is_conflict = True
+            formatted.append({
+                'code': code,
+                'field': field,
+                'message': str(messages),
+            })
+
+    # Also check the errors dict for DRF-level error codes
+    if hasattr(errors, 'get_codes'):
+        codes = errors.get_codes()
+        for field_codes in codes.values():
+            if isinstance(field_codes, list):
+                for c in field_codes:
+                    if c == 'conflict':
+                        is_conflict = True
+                        break
+            elif field_codes == 'conflict':
+                is_conflict = True
+                break
+
+    http_status = status.HTTP_409_CONFLICT if is_conflict else status.HTTP_400_BAD_REQUEST
+
+    return Response(
+        {
+            'data': None,
+            'errors': formatted,
+            'meta': {},
+        },
+        status=http_status,
+    )
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -63,6 +129,8 @@ class OrganizationViewSet(viewsets.ModelViewSet):
 
     List/retrieve requires ``core:read``; create/update/destroy requires
     ``core:admin`` in the user's membership role permissions.
+
+    Update/destroy additionally requires org ownership (IsOrgOwner).
     """
 
     queryset = Organization.objects.all().order_by('name')
@@ -72,6 +140,12 @@ class OrganizationViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
             return [permissions.IsAuthenticated(), OrgRolePermission('core', 'read')]
+        if self.action in ('update', 'partial_update', 'destroy'):
+            return [
+                permissions.IsAuthenticated(),
+                OrgRolePermission('core', 'admin'),
+                IsOrgOwner(),
+            ]
         return [permissions.IsAuthenticated(), OrgRolePermission('core', 'admin')]
 
 
@@ -162,6 +236,84 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Assign the request org to the new membership."""
         serializer.save(organization=self.request.organization)
+
+
+class RegisterView(APIView):
+    """Self-service registration — creates User + Organization + Admin Role
+    + Owner Membership atomically and returns JWT tokens (spec R1-R9).
+
+    POST /api/v1/auth/register/
+    Body: {email, password, full_name, org_name, [org_tax_id]}
+
+    No authentication required.
+    """
+
+    permission_classes = []
+    authentication_classes = []
+
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if not serializer.is_valid():
+            return _register_error_response(serializer.errors)
+
+        data = serializer.validated_data
+
+        try:
+            with transaction.atomic():
+                # 1 — Create User
+                user = User.objects.create_user(
+                    email=data['email'],
+                    password=data['password'],
+                    full_name=data['full_name'],
+                )
+
+                # 2 — Create Organization
+                org = Organization.objects.create(
+                    name=data['org_name'],
+                    tax_id=data.get('org_tax_id') or data['org_name'],
+                )
+
+                # 3 — Create Admin Role with wildcard permissions (spec R8)
+                role = Role.objects.create(
+                    name='Admin',
+                    organization=org,
+                    permissions={'*': ['admin']},
+                )
+
+                # 4 — Create Owner Membership (spec O1)
+                OrganizationMembership.objects.create(
+                    user=user,
+                    organization=org,
+                    role=role,
+                    is_owner=True,
+                    is_default=True,
+                )
+
+        except Exception:
+            # Any unexpected failure → 500
+            return Response(
+                {
+                    'data': None,
+                    'errors': [{
+                        'code': 'server_error',
+                        'message': 'Registration failed. Please try again.',
+                    }],
+                    'meta': {},
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # Issue JWT tokens with active organization claim (spec R7)
+        refresh = RefreshToken.for_user(user)
+        refresh['active_organization_id'] = str(org.id)
+
+        return Response(
+            {
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class SwitchOrgView(APIView):

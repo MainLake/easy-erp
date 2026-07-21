@@ -13,6 +13,8 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.contrib.auth import get_user_model
+from rest_framework import status
+from rest_framework.test import APIClient
 
 from core.models import (
     Organization,
@@ -462,3 +464,242 @@ class WarehouseModelTests(TestCase):
         self.assertEqual(self.user.managed_warehouses.first(), wh1)
         self.assertEqual(self.assistant.assisted_warehouses.count(), 1)
         self.assertEqual(self.assistant.assisted_warehouses.first(), wh2)
+
+
+# =============================================================================
+# Owner model & signal tests — org-owner-role (spec O1-O6)
+# =============================================================================
+
+
+class OwnerModelTests(TestCase):
+    """is_owner field, last-owner invariant via save() and pre_delete signal."""
+
+    def setUp(self):
+        self.org = Organization.objects.create(name='Owner Test Org', tax_id='OWNER-001')
+        self.role = Role.objects.create(name='Admin', organization=self.org, permissions={})
+        self.user_a = User.objects.create_user(
+            email='owner@test.com', password='Pass1234', full_name='Owner A',
+        )
+        self.user_b = User.objects.create_user(
+            email='member@test.com', password='Pass1234', full_name='Member B',
+        )
+
+    def test_is_owner_defaults_to_false(self):
+        """New membership has is_owner=False by default."""
+        m = OrganizationMembership.objects.create(
+            user=self.user_a, organization=self.org, role=self.role,
+        )
+        self.assertFalse(m.is_owner)
+
+    def test_save_prevents_removing_last_owner(self):
+        """O2/O6: Saving is_owner=False on last owner → ValidationError."""
+        m = OrganizationMembership.objects.create(
+            user=self.user_a, organization=self.org, role=self.role, is_owner=True,
+        )
+        m.is_owner = False
+        with self.assertRaises(ValidationError) as ctx:
+            m.save()
+        self.assertIn('last owner', str(ctx.exception))
+
+    def test_save_allows_unset_when_another_owner_exists(self):
+        """Unsetting is_owner works when another owner exists."""
+        OrganizationMembership.objects.create(
+            user=self.user_a, organization=self.org, role=self.role, is_owner=True,
+        )
+        m2 = OrganizationMembership.objects.create(
+            user=self.user_b, organization=self.org, role=self.role, is_owner=True,
+        )
+        # Now unset user_a's ownership — should work because user_b is still owner
+        m = OrganizationMembership.all_objects.get(user=self.user_a)
+        m.is_owner = False
+        m.save()
+        m.refresh_from_db()
+        self.assertFalse(m.is_owner)
+
+    def test_pre_delete_signal_prevents_deleting_last_owner(self):
+        """O6: Deleting last owner membership → ValidationError via signal."""
+        m = OrganizationMembership.objects.create(
+            user=self.user_a, organization=self.org, role=self.role, is_owner=True,
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            m.delete()
+        self.assertIn('last owner', str(ctx.exception))
+
+    def test_pre_delete_signal_allows_delete_when_another_owner_exists(self):
+        """Deleting an owner works when another owner remains."""
+        OrganizationMembership.objects.create(
+            user=self.user_a, organization=self.org, role=self.role, is_owner=True,
+        )
+        m2 = OrganizationMembership.objects.create(
+            user=self.user_b, organization=self.org, role=self.role, is_owner=True,
+        )
+        m2.delete()  # user_a is still owner → ok
+        self.assertFalse(
+            OrganizationMembership.all_objects.filter(user=self.user_b).exists()
+        )
+
+    def test_pre_delete_ignores_non_owner(self):
+        """Deleting a non-owner membership works regardless."""
+        m = OrganizationMembership.objects.create(
+            user=self.user_a, organization=self.org, role=self.role, is_owner=False,
+        )
+        m.delete()
+        self.assertFalse(
+            OrganizationMembership.all_objects.filter(user=self.user_a).exists()
+        )
+
+
+# =============================================================================
+# Owner API integration tests — org-owner-role (spec O5, F2-F3)
+# =============================================================================
+
+
+class OwnerAPITests(TestCase):
+    """Owner-guarded endpoints: org update/delete, fiscal profile, co-owner promotion."""
+
+    def setUp(self):
+        from core.tests import OrgTestMixin
+        self.client = APIClient()
+        self.org = Organization.objects.create(name='OwnerAPI Org', tax_id='API-001')
+        self.admin_role = Role.objects.create(
+            name='Admin', organization=self.org,
+            permissions={'core': ['admin']},
+        )
+        self.owner = User.objects.create_user(
+            email='api-owner@test.com', password='Pass1234', full_name='Owner',
+        )
+        OrganizationMembership.objects.create(
+            user=self.owner, organization=self.org, role=self.admin_role,
+            is_owner=True, is_default=True,
+        )
+        self.member = User.objects.create_user(
+            email='api-member@test.com', password='Pass1234', full_name='Member',
+        )
+        OrganizationMembership.objects.create(
+            user=self.member, organization=self.org, role=self.admin_role,
+            is_owner=False, is_default=False,
+        )
+
+    def _login(self, email):
+        resp = self.client.post('/api/v1/auth/login/', {
+            'email': email, 'password': 'Pass1234',
+        }, format='json')
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {resp.data["access"]}')
+
+    def test_owner_can_update_fiscal_fields(self):
+        """F2: Owner PATCH org fiscal fields → 200."""
+        self._login('api-owner@test.com')
+        response = self.client.patch(
+            f'/api/v1/orgs/{self.org.id}/',
+            {
+                'legal_name': 'Acme S.A.',
+                'tax_regime': 'general',
+                'fiscal_address': 'Av. Siempre Viva 742',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.legal_name, 'Acme S.A.')
+        self.assertEqual(self.org.tax_regime, 'general')
+        self.assertEqual(self.org.fiscal_address, 'Av. Siempre Viva 742')
+
+    def test_non_owner_cannot_update_fiscal_fields(self):
+        """F3: Non-owner PATCH org fiscal fields → 403."""
+        self._login('api-member@test.com')
+        response = self.client.patch(
+            f'/api/v1/orgs/{self.org.id}/',
+            {'legal_name': 'Hacked'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_non_owner_cannot_delete_org(self):
+        """O5: Non-owner DELETE org → 403."""
+        self._login('api-member@test.com')
+        response = self.client.delete(f'/api/v1/orgs/{self.org.id}/')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_owner_can_promote_co_owner(self):
+        """O3: Owner promotes another member to co-owner."""
+        self._login('api-owner@test.com')
+
+        membership = OrganizationMembership.all_objects.get(
+            user=self.member, organization=self.org,
+        )
+        response = self.client.patch(
+            f'/api/v1/memberships/{membership.id}/',
+            {'is_owner': True},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        membership.refresh_from_db()
+        self.assertTrue(membership.is_owner)
+
+    def test_fiscal_fields_null_by_default(self):
+        """F4: Org works without fiscal fields — all null."""
+        self.org.refresh_from_db()
+        self.assertIsNone(self.org.legal_name)
+        self.assertIsNone(self.org.tax_regime)
+        self.assertIsNone(self.org.fiscal_address)
+
+
+# =============================================================================
+# Backfill command test — org-owner-role
+# =============================================================================
+
+
+class BackfillOwnersCommandTest(TestCase):
+    """Management command: backfill_owners marks oldest member as owner."""
+
+    def setUp(self):
+        self.org_a = Organization.objects.create(name='Org A', tax_id='BF-001')
+        self.org_b = Organization.objects.create(name='Org B', tax_id='BF-002')
+        self.role = Role.objects.create(name='Admin', organization=self.org_a, permissions={})
+        self.role_b = Role.objects.create(name='Admin', organization=self.org_b, permissions={})
+
+        # Org A: two members, neither is_owner
+        self.u1 = User.objects.create_user(email='u1@test.com', password='x', full_name='U1')
+        self.u2 = User.objects.create_user(email='u2@test.com', password='x', full_name='U2')
+        OrganizationMembership.objects.create(user=self.u1, organization=self.org_a, role=self.role)
+        OrganizationMembership.objects.create(user=self.u2, organization=self.org_a, role=self.role)
+
+        # Org B: already has an owner
+        self.u3 = User.objects.create_user(email='u3@test.com', password='x', full_name='U3')
+        OrganizationMembership.objects.create(
+            user=self.u3, organization=self.org_b, role=self.role_b, is_owner=True,
+        )
+
+    def test_backfill_marks_oldest_member_as_owner(self):
+        """First (oldest) member of org without owner gets is_owner=True."""
+        from django.core.management import call_command
+
+        call_command('backfill_owners')
+
+        m1 = OrganizationMembership.all_objects.get(user=self.u1, organization=self.org_a)
+        self.assertTrue(m1.is_owner, 'Oldest member should be marked as owner')
+
+        # Second member unchanged
+        m2 = OrganizationMembership.all_objects.get(user=self.u2, organization=self.org_a)
+        self.assertFalse(m2.is_owner)
+
+    def test_backfill_skips_orgs_with_existing_owner(self):
+        """Org B already has owner → not modified."""
+        from django.core.management import call_command
+
+        call_command('backfill_owners')
+
+        m3 = OrganizationMembership.all_objects.get(user=self.u3, organization=self.org_b)
+        self.assertTrue(m3.is_owner)  # was already owner, unchanged
+
+    def test_backfill_is_idempotent(self):
+        """Running backfill twice produces same result."""
+        from django.core.management import call_command
+
+        call_command('backfill_owners')
+        call_command('backfill_owners')
+
+        m1 = OrganizationMembership.all_objects.get(user=self.u1, organization=self.org_a)
+        self.assertTrue(m1.is_owner)
+        m2 = OrganizationMembership.all_objects.get(user=self.u2, organization=self.org_a)
+        self.assertFalse(m2.is_owner)

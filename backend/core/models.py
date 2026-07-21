@@ -23,7 +23,7 @@ class BaseModel(models.Model):
 # Permission validation — shared by Role.clean()
 # ---------------------------------------------------------------------------
 
-VALID_MODULES = {'core', 'inventory', 'purchasing', 'sales', 'invoicing'}
+VALID_MODULES = {'*', 'core', 'inventory', 'purchasing', 'sales', 'invoicing'}
 VALID_ACTIONS = {'read', 'write', 'admin'}
 
 
@@ -165,6 +165,22 @@ class Organization(BaseModel):
     is_active = models.BooleanField(default=True)
     settings = models.JSONField(default=dict, blank=True)
 
+    # Fiscal profile — optional, owner-only managed (spec F1-F6)
+    TAX_REGIME_CHOICES = [
+        ('general', 'General'),
+        ('simplified', 'Simplified'),
+        ('special', 'Special'),
+        ('exempt', 'Exempt'),
+    ]
+    legal_name = models.CharField(max_length=255, null=True, blank=True)
+    tax_regime = models.CharField(
+        max_length=20,
+        choices=TAX_REGIME_CHOICES,
+        null=True,
+        blank=True,
+    )
+    fiscal_address = models.TextField(null=True, blank=True)
+
     class Meta:
         ordering = ['name']
 
@@ -261,6 +277,10 @@ class OrganizationMembership(BaseModel):
         default=False,
         help_text='Automatically selected when no active org is chosen.',
     )
+    is_owner = models.BooleanField(
+        default=False,
+        help_text='Designates this member as an organization owner.',
+    )
 
     objects = OrgAwareManager()
     all_objects = models.Manager()
@@ -273,10 +293,30 @@ class OrganizationMembership(BaseModel):
         return f'{self.user.email} → {self.organization.name} ({self.role.name})'
 
     def save(self, *args, **kwargs):
-        """If is_default is set, clear is_default on other memberships of the same user."""
+        """If is_default is set, clear is_default on other memberships of the same user.
+
+        Enforces at-least-one-owner invariant: if is_owner is being unset,
+        verifies another owner exists in the same organization.
+        """
         if self.is_default:
             OrganizationMembership.all_objects.filter(
                 user=self.user,
                 is_default=True,
             ).exclude(pk=self.pk).update(is_default=False)
+
+        # Owner-invariant check (spec O2/O6): cannot unset is_owner if it's
+        # the last owner for this organization.
+        if self.pk is not None:
+            old = OrganizationMembership.all_objects.filter(pk=self.pk).values('is_owner').first()
+            was_owner = old is not None and old['is_owner']
+            if was_owner and not self.is_owner:
+                remaining = OrganizationMembership.all_objects.filter(
+                    organization_id=self.organization_id,
+                    is_owner=True,
+                ).exclude(pk=self.pk).exists()
+                if not remaining:
+                    raise ValidationError(
+                        'Cannot remove the last owner of the organization.'
+                    )
+
         super().save(*args, **kwargs)

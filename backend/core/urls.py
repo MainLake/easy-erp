@@ -7,6 +7,7 @@ from .views import (
     BranchViewSet,
     OrganizationMembershipViewSet,
     OrganizationViewSet,
+    RegisterView,
     RoleViewSet,
     SwitchOrgView,
     UserViewSet,
@@ -29,6 +30,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 urlpatterns = [
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('auth/register/', RegisterView.as_view(), name='register'),
     path('auth/switch-org/', SwitchOrgView.as_view(), name='switch_org'),
     path('', include(router.urls)),
 ]

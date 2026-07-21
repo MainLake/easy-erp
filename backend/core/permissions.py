@@ -1,5 +1,7 @@
 from rest_framework.permissions import BasePermission
 
+from .models import OrganizationMembership
+
 
 # ============================================================================
 # OrgRolePermission — dynamic, multi-tenant, org-aware RBAC (spec R3, R4, X3)
@@ -63,6 +65,15 @@ class OrgRolePermission(BasePermission):
 
         allowed_actions = membership.role.permissions.get(self.module, [])
 
+        # Wildcard "*" module grants permissions on every module (spec R8).
+        wildcard_actions = membership.role.permissions.get('*', [])
+        if 'admin' in wildcard_actions:
+            return True
+        if self.action == 'read' and 'write' in wildcard_actions:
+            return True
+        if self.action in wildcard_actions:
+            return True
+
         # admin grants everything for this module (spec R4)
         if 'admin' in allowed_actions:
             return True
@@ -80,3 +91,38 @@ class OrgRolePermission(BasePermission):
         Org-ownership checks happen through the org-scoped manager
         that auto-filters querysets by the request organization."""
         return self.has_permission(request, view)
+
+
+# ============================================================================
+# IsOrgOwner — owner-only guard for org management (spec O5)
+# ============================================================================
+
+
+class IsOrgOwner(BasePermission):
+    """Grant access only to organization owners.
+
+    Checks that the authenticated user has an ``is_owner=True`` membership
+    for the active organization (``request.organization``, set by the
+    ``OrganizationMiddleware``).
+
+    Usage::
+
+        permission_classes = [IsOrgOwner]
+
+    The permission is additive — combine with ``OrgRolePermission`` for
+    endpoints that need both ownership AND a specific role action.
+    """
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        org = getattr(request, 'organization', None)
+        if org is None:
+            return False
+
+        return OrganizationMembership.all_objects.filter(
+            user=request.user,
+            organization=org,
+            is_owner=True,
+        ).exists()
