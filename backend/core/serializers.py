@@ -114,3 +114,64 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
                 message='This user already has a membership in this organization.',
             ),
         ]
+
+
+# ---------------------------------------------------------------------------
+# MeSerializer — self-serve user detail with memberships (spec A4, A5)
+# ---------------------------------------------------------------------------
+
+class RoleSummarySerializer(serializers.ModelSerializer):
+    """Lightweight role info for the MeSerializer membership nesting."""
+
+    class Meta:
+        model = Role
+        fields = ['id', 'name', 'permissions']
+
+
+class OrganizationSummarySerializer(serializers.ModelSerializer):
+    """Lightweight org info for the MeSerializer membership nesting."""
+
+    class Meta:
+        model = Organization
+        fields = ['id', 'name', 'tax_id']
+
+
+class OrganizationMembershipNestedSerializer(serializers.ModelSerializer):
+    """Nested membership serializer for MeSerializer.
+
+    Includes the related organization and role as nested sub-objects.
+    """
+
+    organization = OrganizationSummarySerializer(read_only=True)
+    role = RoleSummarySerializer(read_only=True)
+
+    class Meta:
+        model = OrganizationMembership
+        fields = ['id', 'organization', 'role', 'is_default']
+
+
+class MeSerializer(UserSerializer):
+    """Extends UserSerializer with the user's organization memberships.
+
+    Used exclusively by the ``/users/me/`` endpoint so that the
+    frontend can discover the user's orgs, roles, and default
+    membership without hitting a separate endpoint (spec A4, A5).
+
+    Uses ``SerializerMethodField`` to bypass OrgAwareManager filtering
+    on the reverse relation.
+    """
+
+    memberships = serializers.SerializerMethodField()
+
+    class Meta(UserSerializer.Meta):
+        fields = UserSerializer.Meta.fields + ['memberships']
+
+    def get_memberships(self, user):
+        """Return all memberships for this user, scoped only by user (not org)."""
+        qs = (
+            OrganizationMembership.all_objects
+            .filter(user=user)
+            .select_related('organization', 'role')
+            .order_by('organization__name')
+        )
+        return OrganizationMembershipNestedSerializer(qs, many=True).data
