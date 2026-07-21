@@ -50,7 +50,11 @@ class OrganizationSerializer(serializers.ModelSerializer):
 
 
 class BranchSerializer(serializers.ModelSerializer):
-    """CRUD for physical branches belonging to an organization."""
+    """CRUD for physical branches belonging to an organization.
+
+    The ``organization`` field is read-only — it is assigned from
+    ``request.organization`` in the view's ``perform_create``.
+    """
 
     class Meta:
         model = Branch
@@ -58,7 +62,7 @@ class BranchSerializer(serializers.ModelSerializer):
             'id', 'name', 'address', 'organization', 'is_active',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'organization']
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -67,6 +71,9 @@ class RoleSerializer(serializers.ModelSerializer):
     Permissions are validated by ``validate_permissions_schema`` both at
     the field level (model validator) and on serializer ``validate`` to
     catch invalid modules/actions before hitting the DB (spec R1, R2).
+
+    The ``organization`` field is read-only — it is assigned from
+    ``request.organization`` in the view's ``perform_create``.
     """
 
     class Meta:
@@ -75,7 +82,7 @@ class RoleSerializer(serializers.ModelSerializer):
             'id', 'name', 'organization', 'permissions',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'organization']
 
     def validate_permissions(self, value):
         validate_permissions_schema(value)
@@ -87,6 +94,9 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
 
     Enforces (user, organization) uniqueness via DRF validator plus
     model-level unique_together (spec O3).
+
+    The ``organization`` field is read-only — it is assigned from
+    ``request.organization`` in the view's ``perform_create``.
     """
 
     class Meta:
@@ -96,7 +106,7 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
             'is_default', 'is_active',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'organization']
         validators = [
             UniqueTogetherValidator(
                 queryset=OrganizationMembership.objects.all(),

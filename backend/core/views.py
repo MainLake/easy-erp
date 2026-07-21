@@ -77,12 +77,20 @@ class BranchViewSet(viewsets.ModelViewSet):
     serializer_class = BranchSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_queryset(self):
+        """Return branches scoped to the request org via OrgAwareManager."""
+        return Branch.objects.all().order_by('name')
+
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
             return [permissions.IsAuthenticated(), OrgRolePermission('core', 'read')]
         if self.action == 'destroy':
             return [permissions.IsAuthenticated(), OrgRolePermission('core', 'admin')]
         return [permissions.IsAuthenticated(), OrgRolePermission('core', 'write')]
+
+    def perform_create(self, serializer):
+        """Assign the request org to the new branch."""
+        serializer.save(organization=self.request.organization)
 
 
 class RoleViewSet(viewsets.ModelViewSet):
@@ -96,16 +104,25 @@ class RoleViewSet(viewsets.ModelViewSet):
     serializer_class = RoleSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_queryset(self):
+        """Return roles scoped to the request org via OrgAwareManager."""
+        return Role.objects.all().order_by('name')
+
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
             return [permissions.IsAuthenticated(), OrgRolePermission('core', 'read')]
         return [permissions.IsAuthenticated(), OrgRolePermission('core', 'admin')]
+
+    def perform_create(self, serializer):
+        """Assign the request org to the new role."""
+        serializer.save(organization=self.request.organization)
 
 
 class OrganizationMembershipViewSet(viewsets.ModelViewSet):
     """Manage user memberships in organizations (spec O3).
 
     - List/retrieve: members see only their own memberships (admins see all).
+      All queries scoped to the request org via OrgAwareManager.
     - Create/update/destroy: requires ``core:write``.
     """
 
@@ -118,7 +135,12 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        """Scope by request org (via OrgAwareManager) and optionally by user."""
+        qs = (
+            OrganizationMembership.objects
+            .select_related('user', 'organization', 'role')
+            .order_by('organization', 'user')
+        )
         if self.action in ('list', 'retrieve') and not self.request.user.is_superuser:
             qs = qs.filter(user=self.request.user)
         return qs
@@ -127,3 +149,7 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
         if self.action in ('list', 'retrieve'):
             return [permissions.IsAuthenticated()]
         return [permissions.IsAuthenticated(), OrgRolePermission('core', 'write')]
+
+    def perform_create(self, serializer):
+        """Assign the request org to the new membership."""
+        serializer.save(organization=self.request.organization)

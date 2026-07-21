@@ -3,6 +3,8 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 
+from .managers import OrgAwareManager
+
 
 class BaseModel(models.Model):
     """Abstract base with UUID primary key and auto timestamps.
@@ -184,6 +186,8 @@ class Branch(BaseModel):
     )
     is_active = models.BooleanField(default=True)
 
+    objects = OrgAwareManager()
+
     class Meta:
         unique_together = ['organization', 'name']
         ordering = ['organization', 'name']
@@ -214,6 +218,8 @@ class Role(BaseModel):
         blank=True,
         validators=[validate_permissions_schema],
     )
+
+    objects = OrgAwareManager()
 
     class Meta:
         unique_together = ['organization', 'name']
@@ -256,6 +262,9 @@ class OrganizationMembership(BaseModel):
         help_text='Automatically selected when no active org is chosen.',
     )
 
+    objects = OrgAwareManager()
+    all_objects = models.Manager()
+
     class Meta:
         unique_together = ['user', 'organization']
         ordering = ['user', 'organization']
@@ -266,7 +275,7 @@ class OrganizationMembership(BaseModel):
     def save(self, *args, **kwargs):
         """If is_default is set, clear is_default on other memberships of the same user."""
         if self.is_default:
-            OrganizationMembership.objects.filter(
+            OrganizationMembership.all_objects.filter(
                 user=self.user,
                 is_default=True,
             ).exclude(pk=self.pk).update(is_default=False)
