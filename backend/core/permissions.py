@@ -2,55 +2,6 @@ from rest_framework.permissions import BasePermission
 
 
 # ============================================================================
-# Legacy role-based permission classes (to be removed in Phase 6).
-# ============================================================================
-
-class IsAdmin(BasePermission):
-    """Allow only users with the 'admin' role.
-
-    .. deprecated:: Phase 2
-        Replaced by ``OrgRolePermission``.  This class remains available
-        for existing ViewSets and will be removed in Phase 6.
-    """
-
-    def has_permission(self, request, view):
-        return (
-            request.user
-            and request.user.is_authenticated
-            and request.user.role == 'admin'
-        )
-
-
-class IsOperator(BasePermission):
-    """Allow users with 'admin' or 'operator' role.
-
-    .. deprecated:: Phase 2
-        Replaced by ``OrgRolePermission``.
-    """
-
-    def has_permission(self, request, view):
-        return (
-            request.user
-            and request.user.is_authenticated
-            and request.user.role in ('admin', 'operator')
-        )
-
-
-class IsViewer(BasePermission):
-    """Allow any authenticated user regardless of role.
-
-    .. deprecated:: Phase 2
-        Replaced by ``OrgRolePermission``.
-    """
-
-    def has_permission(self, request, view):
-        return (
-            request.user
-            and request.user.is_authenticated
-        )
-
-
-# ============================================================================
 # OrgRolePermission — dynamic, multi-tenant, org-aware RBAC (spec R3, R4, X3)
 # ============================================================================
 
@@ -124,7 +75,8 @@ class OrgRolePermission(BasePermission):
 
     # ------------------------------------------------------------------
     def has_object_permission(self, request, view, obj):
-        """Object-level permission — delegates to ``has_permission`` for now.
+        """Object-level permission — delegates to ``has_permission``.
 
-        Phase 3 will add org-ownership checks on individual objects."""
+        Org-ownership checks happen through the org-scoped manager
+        that auto-filters querysets by the request organization."""
         return self.has_permission(request, view)

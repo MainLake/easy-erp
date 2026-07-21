@@ -31,13 +31,11 @@ class AuthenticationTests(TestCase):
             email='admin@easyerp.local',
             password='testpass123',
             full_name='Admin User',
-            role=User.Role.ADMIN,
         )
         self.viewer = User.objects.create_user(
             email='viewer@easyerp.local',
             password='testpass123',
             full_name='Viewer User',
-            role=User.Role.VIEWER,
         )
 
     # --- A1: Login ---
@@ -91,28 +89,45 @@ class AuthenticationTests(TestCase):
 
 
 class RoleEnforcementTests(TestCase):
-    """A2: Role-based access control — admin vs viewer."""
+    """A2: Role-based access control — admin vs viewer via OrgRolePermission."""
 
     def setUp(self):
+        from core.models import Organization, Role, OrganizationMembership
+
         self.client = APIClient()
+
+        # Create an org and roles so admin membership grants core:admin
+        self.org = Organization.objects.create(
+            name='Role Test Org', tax_id='ROLE-TAX-001',
+        )
+        self.admin_role = Role.objects.create(
+            name='Admin', organization=self.org,
+            permissions={'core': ['admin']},
+        )
+
         self.admin = User.objects.create_user(
             email='admin@easyerp.local',
             password='testpass123',
             full_name='Admin User',
-            role=User.Role.ADMIN,
         )
+        OrganizationMembership.objects.create(
+            user=self.admin, organization=self.org,
+            role=self.admin_role, is_default=True,
+        )
+
         self.operator = User.objects.create_user(
             email='operator@easyerp.local',
             password='testpass123',
             full_name='Operator User',
-            role=User.Role.OPERATOR,
         )
+        # Operator has no membership → OrgRolePermission denies on scoped endpoints
+
         self.viewer = User.objects.create_user(
             email='viewer@easyerp.local',
             password='testpass123',
             full_name='Viewer User',
-            role=User.Role.VIEWER,
         )
+        # Viewer has no membership → OrgRolePermission denies on scoped endpoints
 
     def _login(self, email, password='testpass123'):
         resp = self.client.post('/api/v1/auth/login/', {
@@ -161,7 +176,6 @@ class APIEnvelopeTests(TestCase):
             email='env-admin@easyerp.local',
             password='testpass123',
             full_name='Envelope Admin',
-            role=User.Role.ADMIN,
         )
         resp = self.client.post('/api/v1/auth/login/', {
             'email': 'env-admin@easyerp.local',
@@ -383,7 +397,6 @@ class AuthEnforcementTests(TestCase):
             email='auth-enf@easyerp.local',
             password='testpass123',
             full_name='Auth Enf',
-            role=User.Role.OPERATOR,
         )
 
     def test_unauthenticated_inventory_returns_401(self):

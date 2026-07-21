@@ -70,36 +70,24 @@ class UserManager(BaseUserManager):
     def create_superuser(self, email, password=None, **extra_fields):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
-        extra_fields.setdefault('role', User.Role.ADMIN)
         return self.create_user(email, password, **extra_fields)
 
 
 class User(AbstractBaseUser, PermissionsMixin):
-    """Custom user model: email as login, role-based access control.
+    """Custom user model: email as login, multi-org role-based access.
 
-    Roles (deprecated — kept for Phase 6 cleanup):
-        admin    — full CRUD across all modules, manage users
-        operator — daily operations (CRUD orders, products, etc.)
-        viewer   — read-only access to all modules
+    A user belongs to one or more organizations via OrganizationMembership.
+    The ``active_membership`` property returns the default membership (or
+    the first membership if no default is set).  Permissions are resolved
+    at request-time through the membership's role (OrgRolePermission).
 
-    Multi-org support: a user belongs to one or more organizations via
-    OrganizationMembership.  The ``active_membership`` property returns
-    the default membership (or the first membership if no default is set).
+    The legacy ``role`` CharField was removed in Phase 6 — all role
+    resolution now goes through ``get_active_membership(org_id)``.
     """
-
-    class Role(models.TextChoices):
-        ADMIN = 'admin', 'Admin'
-        OPERATOR = 'operator', 'Operator'
-        VIEWER = 'viewer', 'Viewer'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(unique=True)
     full_name = models.CharField(max_length=255)
-    role = models.CharField(
-        max_length=20,
-        choices=Role.choices,
-        default=Role.VIEWER,
-    )
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

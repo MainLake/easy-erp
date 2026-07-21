@@ -10,15 +10,23 @@ from .serializers import (
     RoleSerializer,
     UserSerializer,
 )
-from .permissions import IsAdmin, OrgRolePermission
+from .permissions import OrgRolePermission
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    """Manage users — admin-only CRUD, plus self-serve /me endpoint."""
+    """Manage users — admin-only CRUD, plus self-serve /me endpoint.
+
+    Admin-only CRUD requires ``core:admin`` in the user's membership
+    role.  The self-serve ``/me`` endpoint only requires authentication.
+    """
 
     queryset = User.objects.all().order_by('-created_at')
     serializer_class = UserSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdmin]
+
+    def get_permissions(self):
+        if self.action == 'me':
+            return [permissions.IsAuthenticated()]
+        return [permissions.IsAuthenticated(), OrgRolePermission('core', 'admin')]
 
     @action(
         detail=False,
