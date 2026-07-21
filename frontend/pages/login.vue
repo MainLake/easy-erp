@@ -7,12 +7,12 @@
         <input v-model="email" type="email" required autocomplete="email" />
       </label>
       <label>
-        Password
+        Contraseña
         <input v-model="password" type="password" required autocomplete="current-password" />
       </label>
       <p v-if="error" class="error">{{ error }}</p>
       <button type="submit" :disabled="loading">
-        {{ loading ? 'Logging in…' : 'Login' }}
+        {{ loading ? 'Ingresando…' : 'Ingresar' }}
       </button>
     </form>
   </div>
@@ -28,8 +28,8 @@ const loading = ref(false)
 
 const { login, user } = useAuth()
 
-// If already logged in, redirect to dashboard
-if (user.value) {
+// If already authenticated, redirect away — middleware handles the right destination
+if (user.value?.active_membership) {
   await navigateTo('/')
 }
 
@@ -38,9 +38,12 @@ async function handleLogin() {
   loading.value = true
   try {
     await login(email.value, password.value)
-    await navigateTo('/')
-  } catch (err) {
-    error.value = 'Invalid email or password.'
+    // login() now handles all post-login routing internally:
+    //   0 orgs → throws error
+    //   1 org  → redirects to /
+    //   2+     → redirects to /select-org
+  } catch (err: any) {
+    error.value = err.message || 'Email o contraseña inválidos.'
   } finally {
     loading.value = false
   }

@@ -1,12 +1,12 @@
 /**
- * HTTP client wrapper with automatic JWT handling.
+ * HTTP client wrapper with automatic JWT handling and org-scoped headers.
  *
- * Attaches the Bearer token to every request. On a 401 response,
- * attempts a silent token refresh before rejecting.
+ * Attaches the Bearer token and X-Organization header to every request.
+ * On a 401 response, attempts a silent token refresh before rejecting.
  */
 export const useApi = () => {
   const config = useRuntimeConfig()
-  const { getAccessToken, getRefreshToken, tryRefresh } = useAuth()
+  const { getAccessToken, getRefreshToken, tryRefresh, activeOrg } = useAuth()
 
   const request = async (
     endpoint: string,
@@ -20,6 +20,12 @@ export const useApi = () => {
     const token = getAccessToken()
     if (token) {
       headers['Authorization'] = `Bearer ${token}`
+    }
+
+    // Inject org context header on every authenticated request (spec I1, A6)
+    // Skip during login/initial load when no org is selected yet
+    if (activeOrg.value?.id) {
+      headers['X-Organization'] = activeOrg.value.id
     }
 
     let response = await fetch(`${config.public.apiBase}${endpoint}`, {
