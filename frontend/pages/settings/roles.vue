@@ -194,10 +194,8 @@ function hasChecked(mod: string, action: string): boolean {
 }
 
 function isActionDisabled(mod: string, action: string): boolean {
-  // admin disables write and read (they are auto-checked)
-  // write disables read (auto-checked)
-  if (hasChecked(mod, 'admin')) return action !== 'admin'
-  if (hasChecked(mod, 'write') && action === 'read') return true
+  // Never disable — let users click freely.
+  // The togglePermission() function handles cascading (auto-check/uncheck).
   return false
 }
 
@@ -206,27 +204,35 @@ function togglePermission(mod: string, action: string) {
     form.permissions[mod] = []
   }
 
-  const current = form.permissions[mod]
+  const current = new Set(form.permissions[mod])
 
-  if (current.includes(action)) {
-    // Uncheck: cascade down (remove lower actions)
-    if (action === 'admin') {
-      form.permissions[mod] = current.filter(a => a !== 'admin' && a !== 'write' && a !== 'read')
+  if (current.has(action)) {
+    // Uncheck: also remove higher actions that depend on this one
+    if (action === 'read') {
+      current.delete('read')
+      current.delete('write')
+      current.delete('admin')
     } else if (action === 'write') {
-      form.permissions[mod] = current.filter(a => a !== 'write' && a !== 'read')
+      current.delete('write')
+      current.delete('admin')
     } else {
-      form.permissions[mod] = current.filter(a => a !== action)
+      current.delete('admin')
     }
   } else {
-    // Check: cascade up (auto-check higher implied actions)
+    // Check: also add lower actions implied by this one
     if (action === 'admin') {
-      form.permissions[mod] = ['admin']
+      current.add('admin')
+      current.add('write')
+      current.add('read')
     } else if (action === 'write') {
-      form.permissions[mod] = ['write', 'read']
+      current.add('write')
+      current.add('read')
     } else {
-      form.permissions[mod] = [...current.filter(a => a !== 'write' && a !== 'admin'), 'read']
+      current.add('read')
     }
   }
+
+  form.permissions[mod] = [...current]
 
   // Remove module key if empty
   if (form.permissions[mod].length === 0) {

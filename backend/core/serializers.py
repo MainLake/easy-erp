@@ -107,6 +107,7 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
     Enforces (user, organization) uniqueness via DRF validator plus
     model-level unique_together (spec O3).
 
+    Accepts ``user_email`` on create (write-only) to invite existing users.
     The ``organization`` field is read-only — it is assigned from
     ``request.organization`` in the view's ``perform_create``.
     """
@@ -114,12 +115,14 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
     user_name = serializers.SerializerMethodField()
     user_email = serializers.SerializerMethodField()
     role_name = serializers.SerializerMethodField()
+    invite_email = serializers.EmailField(write_only=True, required=False)
 
     class Meta:
         model = OrganizationMembership
         fields = [
             'id', 'user', 'organization', 'role',
             'user_name', 'user_email', 'role_name',
+            'invite_email',
             'is_default', 'is_active', 'is_owner',
             'created_at', 'updated_at',
         ]
@@ -140,6 +143,21 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
 
     def get_role_name(self, obj):
         return obj.role.name if obj.role else None
+
+    def validate(self, attrs):
+        """Resolve invite_email to a user instance on create."""
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+
+        invite_email = attrs.pop('invite_email', None)
+        if invite_email:
+            try:
+                attrs['user'] = User.objects.get(email=invite_email)
+            except User.DoesNotExist:
+                raise serializers.ValidationError({
+                    'invite_email': 'No se encontró un usuario con ese email.',
+                })
+        return attrs
 
 
 # ---------------------------------------------------------------------------
