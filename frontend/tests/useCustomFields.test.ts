@@ -1,11 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-// Clear the module-level cache between tests
-import { clearCustomFieldsCache } from '../composables/useCustomFields'
-
 beforeEach(() => {
   vi.restoreAllMocks()
-  clearCustomFieldsCache()
 })
 
 describe('useCustomFields', () => {

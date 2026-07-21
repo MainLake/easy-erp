@@ -4,7 +4,7 @@
  * Fetches field definitions from `/api/v1/custom-fields/?model_name=X`,
  * caches them by model_name, and exposes a reactive list.
  */
-import { ref, shallowRef, type Ref } from 'vue'
+import { ref, type Ref } from 'vue'
 
 export interface FieldDefinition {
   id: string
@@ -19,16 +19,6 @@ export interface FieldDefinition {
   updated_at: string
 }
 
-// Simple module-level cache keyed by model_name
-const cache = new Map<string, FieldDefinition[]>()
-
-/**
- * Clear the module-level cache (primarily for testing).
- */
-export function clearCustomFieldsCache(): void {
-  cache.clear()
-}
-
 export const useCustomFields = () => {
   const { request } = useApi()
 
@@ -37,11 +27,6 @@ export const useCustomFields = () => {
   const error = ref<string | null>(null)
 
   async function fetchDefinitions(modelName: string): Promise<FieldDefinition[]> {
-    if (cache.has(modelName)) {
-      definitions.value = cache.get(modelName)!
-      return definitions.value
-    }
-
     loading.value = true
     error.value = null
 
@@ -58,7 +43,6 @@ export const useCustomFields = () => {
       }
       const envelope = await res.json()
       const data: FieldDefinition[] = envelope.data ?? envelope.results ?? []
-      cache.set(modelName, data)
       definitions.value = data
       return data
     } catch (e: any) {
