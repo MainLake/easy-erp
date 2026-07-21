@@ -70,12 +70,12 @@ async function selectOrg(orgId: string): Promise<void> {
   }
 }
 
-onMounted(async () => {
-  // Single-org users auto-redirect (U4)
-  if (memberships.value.length === 1) {
-    await selectOrg(memberships.value[0].organization.id)
+// Wait for user to be loaded, then auto-redirect single-org users (U4)
+watch(() => user.value, (val) => {
+  if (val && memberships.value.length === 1) {
+    selectOrg(memberships.value[0].organization.id)
   }
-})
+}, { immediate: true })
 </script>
 
 <style scoped>
