@@ -127,6 +127,9 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'organization']
+        extra_kwargs = {
+            'user': {'required': False},
+        }
 
     def get_user_name(self, obj):
         return obj.user.full_name if obj.user else None
