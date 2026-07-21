@@ -1,12 +1,17 @@
 <template>
-  <div class="app-shell">
+  <!-- Show nothing until auth state is resolved — prevents shell flash on unauthenticated pages -->
+  <div v-if="!user" class="app-loading">
+    <p>Cargando…</p>
+  </div>
+
+  <div v-else class="app-shell">
     <!-- Top Navbar — full width above sidebar + main -->
     <header class="topbar">
       <div class="topbar-brand">Easy ERP</div>
       <div class="topbar-center">
         <OrgSelector />
       </div>
-      <div class="topbar-user" v-if="user">
+      <div class="topbar-user">
         <span class="topbar-user-name">{{ user.full_name }}</span>
         <button class="btn-logout" @click="logout()">Cerrar sesión</button>
       </div>
@@ -26,6 +31,17 @@ const { user, logout } = useAuth()
 </script>
 
 <style>
+/* === Loading state (shown when not authenticated) === */
+.app-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-family: var(--font-family);
+  color: var(--color-muted);
+  background: var(--color-bg);
+}
+
 /* === Reset / Base — scoped to app-shell === */
 body {
   margin: 0;

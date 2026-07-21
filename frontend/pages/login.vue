@@ -19,7 +19,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+
+definePageMeta({ layout: 'auth' })
 
 const email = ref('')
 const password = ref('')
@@ -28,10 +30,12 @@ const loading = ref(false)
 
 const { login, user } = useAuth()
 
-// If already authenticated, redirect away — middleware handles the right destination
-if (user.value?.active_membership) {
-  await navigateTo('/')
-}
+onMounted(async () => {
+  // If already authenticated, redirect away
+  if (user.value?.active_membership) {
+    await navigateTo('/')
+  }
+})
 
 async function handleLogin() {
   error.value = ''
