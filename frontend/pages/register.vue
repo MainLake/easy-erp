@@ -1,21 +1,42 @@
 <template>
-  <div class="login-page">
-    <form class="login-form" @submit.prevent="handleLogin">
-      <h2>Easy ERP — Login</h2>
+  <div class="register-page">
+    <form class="register-form" @submit.prevent="handleRegister">
+      <h2>Easy ERP — Registro</h2>
+
+      <label>
+        Nombre completo
+        <input v-model="fullName" type="text" required autocomplete="name" />
+      </label>
+
       <label>
         Email
         <input v-model="email" type="email" required autocomplete="email" />
       </label>
+
       <label>
         Contraseña
-        <input v-model="password" type="password" required autocomplete="current-password" />
+        <input v-model="password" type="password" required autocomplete="new-password" />
+        <span class="hint">Mínimo 8 caracteres, al menos una letra y un número</span>
       </label>
+
+      <label>
+        Nombre de la empresa
+        <input v-model="orgName" type="text" required />
+      </label>
+
+      <label>
+        RFC (opcional)
+        <input v-model="orgTaxId" type="text" autocomplete="off" />
+      </label>
+
       <p v-if="error" class="error">{{ error }}</p>
+
       <button type="submit" :disabled="loading">
-        {{ loading ? 'Ingresando…' : 'Ingresar' }}
+        {{ loading ? 'Creando cuenta…' : 'Registrarse' }}
       </button>
-      <p class="register-link">
-        ¿No tenés cuenta? <NuxtLink to="/register">Registrate</NuxtLink>
+
+      <p class="login-link">
+        ¿Ya tenés cuenta? <NuxtLink to="/login">Iniciá sesión</NuxtLink>
       </p>
     </form>
   </div>
@@ -26,12 +47,15 @@ import { ref, onMounted } from 'vue'
 
 definePageMeta({ layout: 'auth' })
 
+const fullName = ref('')
 const email = ref('')
 const password = ref('')
+const orgName = ref('')
+const orgTaxId = ref('')
 const error = ref('')
 const loading = ref(false)
 
-const { login, user } = useAuth()
+const { register, user } = useAuth()
 
 onMounted(async () => {
   // If already authenticated, redirect away
@@ -40,17 +64,20 @@ onMounted(async () => {
   }
 })
 
-async function handleLogin() {
+async function handleRegister() {
   error.value = ''
   loading.value = true
   try {
-    await login(email.value, password.value)
-    // login() now handles all post-login routing internally:
-    //   0 orgs → throws error
-    //   1 org  → redirects to /
-    //   2+     → redirects to /select-org
+    await register({
+      email: email.value,
+      password: password.value,
+      full_name: fullName.value,
+      org_name: orgName.value,
+      org_tax_id: orgTaxId.value || undefined,
+    })
+    // register() handles token persistence, user fetch, and navigation to /
   } catch (err: any) {
-    error.value = err.message || 'Email o contraseña inválidos.'
+    error.value = err.message || 'Error al crear la cuenta. Intentalo de nuevo.'
   } finally {
     loading.value = false
   }
@@ -58,42 +85,46 @@ async function handleLogin() {
 </script>
 
 <style scoped>
-.login-page {
+.register-page {
   display: flex;
   justify-content: center;
   align-items: center;
   min-height: 100vh;
   background: #f5f5f5;
 }
-.login-form {
+.register-form {
   background: #fff;
   padding: 2rem;
   border-radius: 8px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
-.login-form h2 {
+.register-form h2 {
   margin: 0 0 0.5rem;
   text-align: center;
 }
-.login-form label {
+.register-form label {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
   font-size: 0.9rem;
   color: #555;
 }
-.login-form input {
+.register-form label .hint {
+  font-size: 0.75rem;
+  color: #999;
+}
+.register-form input {
   padding: 0.6rem;
   border: 1px solid #ccc;
   border-radius: 4px;
   font-size: 1rem;
 }
-.login-form button {
+.register-form button {
   padding: 0.7rem;
   background: #1a1a2e;
   color: #fff;
@@ -102,11 +133,11 @@ async function handleLogin() {
   font-size: 1rem;
   cursor: pointer;
 }
-.login-form button:disabled {
+.register-form button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
-.login-form button:hover:not(:disabled) {
+.register-form button:hover:not(:disabled) {
   background: #2d2d44;
 }
 .error {
@@ -114,12 +145,12 @@ async function handleLogin() {
   font-size: 0.85rem;
   margin: 0;
 }
-.register-link {
+.login-link {
   text-align: center;
   font-size: 0.9rem;
   color: #777;
 }
-.register-link a {
+.login-link a {
   color: #1a1a2e;
   text-decoration: underline;
 }

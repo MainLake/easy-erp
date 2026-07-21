@@ -164,3 +164,162 @@ describe('login: post-login routing', () => {
       .rejects.toThrow('No tenés organizaciones asignadas')
   })
 })
+
+describe('register', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    localStorage.clear()
+  })
+
+  it('registers successfully, persists tokens, fetches user, navigates to /', async () => {
+    const navigateToSpy = vi.fn(() => Promise.resolve())
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).navigateTo = navigateToSpy
+
+    // Mock: POST /auth/register/ → 201 with tokens
+    // Mock: GET /users/me/ → 200 with user (one membership)
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: () => Promise.resolve({
+          data: { access: 'access-reg-1', refresh: 'refresh-reg-1' },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          data: {
+            id: 'user-2',
+            email: 'new@test.com',
+            full_name: 'New User',
+            role: 'Admin',
+            memberships: [
+              {
+                id: 'mem-2',
+                is_default: true,
+                is_owner: true,
+                organization: { id: 'org-2', name: 'New Org' },
+                role: { id: 'role-2', name: 'Admin' },
+              },
+            ],
+          },
+        }),
+      })
+
+    const { useAuth } = await import('../composables/useAuth')
+    const auth = useAuth()
+
+    await auth.register({
+      email: 'new@test.com',
+      password: 'Pass1234',
+      full_name: 'New User',
+      org_name: 'New Org',
+    })
+
+    // Tokens persisted
+    expect(localStorage.getItem('access_token')).toBe('access-reg-1')
+    expect(localStorage.getItem('refresh_token')).toBe('refresh-reg-1')
+
+    // User state hydrated with active_membership
+    expect(auth.user.value).not.toBeNull()
+    expect(auth.user.value!.email).toBe('new@test.com')
+    expect(auth.user.value!.active_membership).toBeTruthy()
+    expect(auth.user.value!.active_membership!.organization.name).toBe('New Org')
+
+    // Redirected to /
+    expect(navigateToSpy).toHaveBeenCalledWith('/')
+  })
+
+  it('throws on 409 conflict (duplicate email or org)', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: () => Promise.resolve({
+        errors: [{ code: 'conflict', field: 'email', message: 'A user with this email already exists' }],
+      }),
+    })
+
+    const { useAuth } = await import('../composables/useAuth')
+    const auth = useAuth()
+
+    await expect(
+      auth.register({
+        email: 'existing@test.com',
+        password: 'Pass1234',
+        full_name: 'Existing',
+        org_name: 'Existing Org',
+      }),
+    ).rejects.toThrow('A user with this email already exists')
+  })
+
+  it('throws on 400 validation error', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: () => Promise.resolve({
+        errors: [{ code: 'invalid', field: 'password', message: 'Password must contain at least one letter and one digit' }],
+      }),
+    })
+
+    const { useAuth } = await import('../composables/useAuth')
+    const auth = useAuth()
+
+    await expect(
+      auth.register({
+        email: 'weak@test.com',
+        password: '12345678',
+        full_name: 'Weak Pwd',
+        org_name: 'Weak Org',
+      }),
+    ).rejects.toThrow('Password must contain at least one letter and one digit')
+  })
+
+  it('passes optional org_tax_id in the request payload', async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValue({
+        ok: true,
+        status: 201,
+        json: () => Promise.resolve({
+          data: { access: 'access-tax', refresh: 'refresh-tax' },
+        }),
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          data: {
+            id: 'user-3',
+            email: 'tax@test.com',
+            full_name: 'Tax User',
+            role: 'Admin',
+            memberships: [
+              {
+                id: 'mem-3',
+                is_default: true,
+                is_owner: true,
+                organization: { id: 'org-3', name: 'Tax Org' },
+                role: { id: 'role-3', name: 'Admin' },
+              },
+            ],
+          },
+        }),
+      })
+
+    globalThis.fetch = fetchSpy
+
+    const { useAuth } = await import('../composables/useAuth')
+    const auth = useAuth()
+
+    await auth.register({
+      email: 'tax@test.com',
+      password: 'Pass1234',
+      full_name: 'Tax User',
+      org_name: 'Tax Org',
+      org_tax_id: 'RFC-001',
+    })
+
+    // Verify the tax_id was sent in the request body
+    const firstCallBody = JSON.parse(fetchSpy.mock.calls[0]![1]!.body as string)
+    expect(firstCallBody.org_tax_id).toBe('RFC-001')
+  })
+})

@@ -10,8 +10,8 @@
 import { decodeJWT } from '../composables/useAuth'
 
 export default defineNuxtRouteMiddleware(async (to) => {
-  // Skip auth guard on login page
-  if (to.path === '/login') {
+  // Skip auth guard on login and register pages
+  if (to.path === '/login' || to.path === '/register') {
     return
   }
 

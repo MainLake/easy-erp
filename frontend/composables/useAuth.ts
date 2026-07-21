@@ -42,6 +42,14 @@ export interface JwtPayload {
   [key: string]: unknown
 }
 
+export interface RegisterPayload {
+  email: string
+  password: string
+  full_name: string
+  org_name: string
+  org_tax_id?: string
+}
+
 // ---- utility functions ----
 
 /**
@@ -106,6 +114,45 @@ export const useAuth = () => {
       refreshToken.value = refresh
       localStorage.setItem('refresh_token', refresh)
     }
+  }
+
+  /**
+   * Self-service registration: creates user + org + role, returns JWT.
+   * Auto-login flow: persist tokens → fetch user → set active_membership
+   * (exactly one org) → navigate to /.
+   */
+  async function register(payload: RegisterPayload): Promise<void> {
+    const response = await fetch(`${config.public.apiBase}/auth/register/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    if (!response.ok) {
+      const envelope = await response.json()
+      const msg = envelope?.errors?.[0]?.message
+        || envelope?.data?.detail
+        || envelope?.detail
+        || 'Registration failed'
+      throw new Error(msg)
+    }
+
+    const envelope = await response.json()
+    const tokens = envelope.data ?? envelope
+    persistTokens(tokens.access, tokens.refresh)
+
+    // Fetch user profile after registration
+    await fetchUser()
+
+    // After registration, exactly one org is created
+    const memberships = user.value?.memberships ?? []
+    if (memberships.length === 0) {
+      throw new Error('La cuenta se creó pero no se encontró la organización. Contactá al administrador.')
+    }
+
+    user.value = { ...user.value!, active_membership: memberships[0] }
+    localStorage.setItem('user', JSON.stringify(user.value))
+    await navigateTo('/')
   }
 
   /**
@@ -301,6 +348,7 @@ export const useAuth = () => {
   return {
     user,
     login,
+    register,
     logout,
     fetchUser,
     initAuth,
