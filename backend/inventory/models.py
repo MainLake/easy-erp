@@ -5,6 +5,7 @@ All models inherit from core.BaseModel for consistent UUID primary keys
 and auto-timestamps.
 """
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 
@@ -55,10 +56,28 @@ class Product(BaseModel):
 
 
 class Warehouse(BaseModel):
-    """Physical storage location."""
+    """Physical storage location.
+
+    Multi-org (Phase 1): a warehouse may have a manager and assistants who
+    are members of the same organization.  The ``branch`` FK is added in
+    Phase 3 once Branch is fully wired into the org hierarchy.
+    """
 
     name = models.CharField(max_length=100)
     location = models.CharField(max_length=255, blank=True, default='')
+
+    managed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='managed_warehouses',
+    )
+    assistants = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='assisted_warehouses',
+    )
 
     class Meta:
         ordering = ['name']
