@@ -2,6 +2,7 @@
 
 from rest_framework import serializers
 
+from core.managers import get_current_organization
 from .models import Customer, SalesOrder, SOLineItem
 
 
@@ -10,6 +11,21 @@ class CustomerSerializer(serializers.ModelSerializer):
         model = Customer
         fields = ['id', 'name', 'contact', 'tax_id', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate_tax_id(self, value):
+        """Per-org tax_id uniqueness (spec S1)."""
+        org_id = get_current_organization()
+        if org_id:
+            existing = Customer.objects.filter(
+                tax_id=value, organization_id=org_id,
+            )
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise serializers.ValidationError(
+                    f'Customer with tax ID "{value}" already exists in this organization.',
+                )
+        return value
 
 
 class SOLineItemSerializer(serializers.ModelSerializer):

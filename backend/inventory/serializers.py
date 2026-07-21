@@ -2,6 +2,7 @@
 
 from rest_framework import serializers
 
+from core.managers import get_current_organization
 from .models import Category, Product, Warehouse, StockLevel, StockMovement
 from . import services
 
@@ -18,6 +19,21 @@ class ProductSerializer(serializers.ModelSerializer):
         model = Product
         fields = ['id', 'sku', 'name', 'description', 'cost', 'price', 'category', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate_sku(self, value):
+        """Per-org SKU uniqueness (spec I1)."""
+        org_id = get_current_organization()
+        if org_id:
+            existing = Product.objects.filter(
+                sku=value, organization_id=org_id,
+            )
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise serializers.ValidationError(
+                    f'Product with SKU "{value}" already exists in this organization.',
+                )
+        return value
 
 
 class WarehouseSerializer(serializers.ModelSerializer):

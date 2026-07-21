@@ -23,9 +23,12 @@ from core.permissions import OrgRolePermission
 class CategoryViewSet(viewsets.ModelViewSet):
     """CRUD for product categories — org-scoped via OrgAwareManager."""
 
-    queryset = Category.objects.all().order_by('name')
+    queryset = Category.objects.all()
     serializer_class = CategorySerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Category.objects.all().order_by('name')
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
@@ -41,12 +44,15 @@ class CategoryViewSet(viewsets.ModelViewSet):
 class ProductViewSet(viewsets.ModelViewSet):
     """CRUD for products plus stock mutation actions — org-scoped."""
 
-    queryset = Product.objects.all().order_by('name')
+    queryset = Product.objects.all()
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['name', 'category', 'sku']
     search_fields = ['name', 'sku']
     ordering_fields = ['name', 'sku', 'price', 'created_at']
+
+    def get_queryset(self):
+        return Product.objects.all().order_by('name')
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve', 'stock'):
@@ -140,9 +146,12 @@ class ProductViewSet(viewsets.ModelViewSet):
 class WarehouseViewSet(viewsets.ModelViewSet):
     """CRUD for warehouses — org-scoped."""
 
-    queryset = Warehouse.objects.all().order_by('name')
+    queryset = Warehouse.objects.all()
     serializer_class = WarehouseSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Warehouse.objects.all().order_by('name')
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
@@ -163,7 +172,7 @@ class StockMovementViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = StockMovement.objects.select_related('product', 'warehouse').order_by('-timestamp')
         org = getattr(self.request, 'organization', None)
         if org:
             qs = qs.filter(product__organization=org)

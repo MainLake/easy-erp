@@ -19,9 +19,12 @@ from core.permissions import OrgRolePermission
 class SupplierViewSet(viewsets.ModelViewSet):
     """CRUD for suppliers — org-scoped."""
 
-    queryset = Supplier.objects.all().order_by('name')
+    queryset = Supplier.objects.all()
     serializer_class = SupplierSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Supplier.objects.all().order_by('name')
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
@@ -37,9 +40,12 @@ class SupplierViewSet(viewsets.ModelViewSet):
 class PurchaseOrderViewSet(viewsets.ModelViewSet):
     """CRUD for purchase orders + lifecycle actions (send, receive)."""
 
-    queryset = PurchaseOrder.objects.prefetch_related('line_items__product').order_by('-created_at')
+    queryset = PurchaseOrder.objects.all()
     serializer_class = PurchaseOrderSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return PurchaseOrder.objects.prefetch_related('line_items__product').order_by('-created_at')
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):

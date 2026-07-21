@@ -20,7 +20,7 @@ from core.permissions import OrgRolePermission
 class OrganizationViewSet(viewsets.ModelViewSet):
     """CRUD for legal entities (invoicing Organization)."""
 
-    queryset = Organization.objects.all().order_by('name')
+    queryset = Organization.objects.all()
     serializer_class = OrganizationSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -45,11 +45,14 @@ class OrganizationViewSet(viewsets.ModelViewSet):
 class InvoiceViewSet(viewsets.ModelViewSet):
     """CRUD for invoices + generate action (from fulfilled SO)."""
 
-    queryset = Invoice.objects.select_related(
-        'organization', 'customer', 'sales_order',
-    ).prefetch_related('notes').order_by('-created_at')
+    queryset = Invoice.objects.all()
     serializer_class = InvoiceSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Invoice.objects.select_related(
+            'organization', 'customer', 'sales_order',
+        ).prefetch_related('notes').order_by('-created_at')
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
@@ -94,9 +97,12 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 class CreditDebitNoteViewSet(viewsets.ModelViewSet):
     """CRUD for credit/debit notes + generate actions."""
 
-    queryset = CreditDebitNote.objects.select_related('invoice').order_by('-created_at')
+    queryset = CreditDebitNote.objects.all()
     serializer_class = CreditDebitNoteSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return CreditDebitNote.objects.select_related('invoice').order_by('-created_at')
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):

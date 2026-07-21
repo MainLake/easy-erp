@@ -57,6 +57,7 @@ def receive_po(*, po_id) -> PurchaseOrder:
             warehouse = Warehouse.objects.create(
                 name='Default Warehouse',
                 location='Auto-created for PO receipt',
+                organization_id=po.organization_id,
             )
 
         for line in po.line_items.select_related('product').all():

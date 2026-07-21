@@ -2,6 +2,7 @@
 
 from rest_framework import serializers
 
+from core.managers import get_current_organization
 from .models import Supplier, PurchaseOrder, POLineItem
 
 
@@ -10,6 +11,21 @@ class SupplierSerializer(serializers.ModelSerializer):
         model = Supplier
         fields = ['id', 'name', 'contact', 'tax_id', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate_tax_id(self, value):
+        """Per-org tax_id uniqueness (spec P1)."""
+        org_id = get_current_organization()
+        if org_id:
+            existing = Supplier.objects.filter(
+                tax_id=value, organization_id=org_id,
+            )
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise serializers.ValidationError(
+                    f'Supplier with tax ID "{value}" already exists in this organization.',
+                )
+        return value
 
 
 class POLineItemSerializer(serializers.ModelSerializer):
