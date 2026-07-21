@@ -40,23 +40,24 @@ def _format_debit_note_number(number: int) -> str:
 
 def _get_or_create_invoicing_org(core_organization_id) -> Organization:
     """Return the invoicing Organization row for *core_organization_id*,
-    creating one with default sequencing counters if none exists."""
-    org = Organization.objects.filter(
-        core_organization_id=core_organization_id,
-    ).first()
-    if org is None:
-        # Fetch the core org to copy its name / tax_id into the invoicing row.
-        from core.models import Organization as CoreOrg
+    creating one with default sequencing counters if none exists.
 
-        core_org = CoreOrg.objects.get(id=core_organization_id)
-        org = Organization.objects.create(
-            name=core_org.name,
-            tax_id=core_org.tax_id,
-            core_organization=core_org,
-            last_invoice_number=0,
-            next_credit_note_number=1,
-            next_debit_note_number=1,
-        )
+    Uses get_or_create() with a database-level UniqueConstraint to
+    prevent race conditions on concurrent invoice generation.
+    """
+    from core.models import Organization as CoreOrg
+
+    core_org = CoreOrg.objects.get(id=core_organization_id)
+    org, _created = Organization.objects.get_or_create(
+        core_organization=core_org,
+        defaults={
+            'name': core_org.name,
+            'tax_id': core_org.tax_id,
+            'last_invoice_number': 0,
+            'next_credit_note_number': 1,
+            'next_debit_note_number': 1,
+        },
+    )
     return org
 
 

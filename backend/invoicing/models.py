@@ -38,6 +38,12 @@ class Organization(BaseModel):
 
     class Meta:
         ordering = ['name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['core_organization'],
+                name='unique_core_organization_per_invoicing_org',
+            ),
+        ]
 
     def __str__(self):
         return self.name
