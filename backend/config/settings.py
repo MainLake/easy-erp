@@ -152,3 +152,6 @@ CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',
 ]
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = list(__import__('corsheaders.defaults').default_headers) + [
+    'x-organization',
+]
