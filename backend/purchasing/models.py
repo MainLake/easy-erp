@@ -5,6 +5,7 @@ Purchase Order lifecycle: draft → sent → received.
 Status transitions are enforced by the service layer, not model save().
 """
 
+from django.conf import settings
 from django.db import models
 
 from core.managers import OrgAwareManager
@@ -58,6 +59,13 @@ class PurchaseOrder(BaseModel):
         on_delete=models.PROTECT,
         null=True,
         related_name='purchasing_orders',
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_purchase_orders',
     )
 
     objects = OrgAwareManager()

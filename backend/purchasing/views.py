@@ -56,7 +56,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated(), OrgRolePermission('purchasing', 'write')]
 
     def perform_create(self, serializer):
-        serializer.save(organization=self.request.organization)
+        serializer.save(
+            organization=self.request.organization,
+            created_by=self.request.user,
+        )
 
     @action(detail=True, methods=['post'])
     def send(self, request, pk=None):

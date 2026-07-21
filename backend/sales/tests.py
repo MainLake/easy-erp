@@ -266,6 +266,79 @@ class SalesOrderLifecycleTests(OrgTestMixin, TestCase):
         )
         self.assertEqual(reconfirm.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_create_sales_order_sets_created_by_to_authenticated_user(self):
+        """Authorship: created SO's created_by == authenticated user."""
+        response = self._create_so(self.customer, [
+            {
+                'product': str(self.product.id),
+                'warehouse': str(self.warehouse.id),
+                'quantity': 1,
+                'unit_price': '25.00',
+            },
+        ])
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['created_by'], self.operator.id)
+
+    def test_create_sales_order_ignores_spoofed_created_by(self):
+        """Authorship: spoofed created_by in payload is ignored on create."""
+        other_user = self.create_org_user(
+            'so-other@easyerp.local', full_name='Other User',
+        )
+        data = {
+            'customer': str(self.customer.id),
+            'created_by': str(other_user.id),
+            'line_items_write': [
+                {
+                    'product': str(self.product.id),
+                    'warehouse': str(self.warehouse.id),
+                    'quantity': 1,
+                    'unit_price': '25.00',
+                },
+            ],
+        }
+        response = self.client.post('/api/v1/sales/orders/', data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        so = SalesOrder.objects.get(id=response.data['id'])
+        self.assertEqual(so.created_by_id, self.operator.id)
+
+    def test_patch_sales_order_cannot_override_created_by(self):
+        """Authorship: created_by is immutable after creation via PATCH."""
+        create_resp = self._create_so(self.customer, [
+            {
+                'product': str(self.product.id),
+                'warehouse': str(self.warehouse.id),
+                'quantity': 1,
+                'unit_price': '25.00',
+            },
+        ])
+        so_id = create_resp.data['id']
+
+        other_user = self.create_org_user(
+            'so-patcher@easyerp.local', full_name='Patcher User',
+        )
+        patch_resp = self.client.patch(
+            f'/api/v1/sales/orders/{so_id}/',
+            {'created_by': str(other_user.id), 'notes': 'updated'},
+            format='json',
+        )
+        self.assertEqual(patch_resp.status_code, status.HTTP_200_OK)
+
+        so = SalesOrder.objects.get(id=so_id)
+        self.assertEqual(so.created_by_id, self.operator.id)
+
+    def test_null_created_by_order_lists_and_serializes_without_error(self):
+        """Authorship: legacy/null created_by renders created_by_name as None."""
+        SalesOrder.objects.create(
+            customer=self.customer, organization=self.org, created_by=None,
+        )
+        list_resp = self.client.get('/api/v1/sales/orders/')
+        self.assertEqual(list_resp.status_code, status.HTTP_200_OK)
+
+        so = SalesOrder.objects.filter(created_by__isnull=True).first()
+        detail_resp = self.client.get(f'/api/v1/sales/orders/{so.id}/')
+        self.assertEqual(detail_resp.status_code, status.HTTP_200_OK)
+        self.assertIsNone(detail_resp.data['created_by_name'])
+
     def test_invalid_transition_draft_to_fulfilled_returns_400(self):
         """S2: draft → fulfill (skipping confirmed) → 400."""
         inventory_services.add_stock(

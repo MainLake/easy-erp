@@ -16,6 +16,7 @@
       @search="handleSearch"
     >
       <template #cell-customer_name="{ value }">{{ value || '—' }}</template>
+      <template #cell-created_by_name="{ value }">{{ value || '—' }}</template>
       <template #cell-status="{ value }">
         <span :class="`badge badge-${value}`">{{ (statusLabels as any)[value] || value }}</span>
       </template>
@@ -95,6 +96,7 @@
             <p><strong>Cliente:</strong> {{ viewing?.customer_name }}</p>
             <p><strong>Fecha:</strong> {{ viewing?.order_date ? new Date(viewing.order_date).toLocaleDateString() : '—' }}</p>
             <p><strong>Notas:</strong> {{ viewing?.notes || '—' }}</p>
+            <p><strong>Creado por:</strong> {{ viewing?.created_by_name || '—' }}</p>
             <h4 style="margin:1.25rem 0 0.5rem;font-weight:600;color:var(--color-heading);">Líneas</h4>
             <table class="line-items-table">
               <thead><tr><th>Producto</th><th>Almacén</th><th>Cant.</th><th>Precio Unitario</th><th>Subtotal</th></tr></thead>
@@ -147,6 +149,7 @@ const columns = [
   { key: 'status', label: 'Estado' },
   { key: 'order_date', label: 'Fecha' },
   { key: 'notes', label: 'Notas' },
+  { key: 'created_by_name', label: 'Creado por' },
 ]
 
 const statusLabels = {

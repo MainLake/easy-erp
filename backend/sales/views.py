@@ -58,7 +58,10 @@ class SalesOrderViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated(), OrgRolePermission('sales', 'write')]
 
     def perform_create(self, serializer):
-        serializer.save(organization=self.request.organization)
+        serializer.save(
+            organization=self.request.organization,
+            created_by=self.request.user,
+        )
 
     @action(detail=True, methods=['post'])
     def confirm(self, request, pk=None):
