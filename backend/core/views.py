@@ -6,9 +6,10 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.db import transaction
 
-from .models import Branch, Organization, OrganizationMembership, Role, User
+from .models import Branch, CustomField, Organization, OrganizationMembership, Role, User
 from .serializers import (
     BranchSerializer,
+    CustomFieldSerializer,
     MeSerializer,
     OrganizationMembershipSerializer,
     OrganizationSerializer,
@@ -235,6 +236,32 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """Assign the request org to the new membership."""
+        serializer.save(organization=self.request.organization)
+
+
+class CustomFieldViewSet(viewsets.ModelViewSet):
+    """CRUD for per-org custom field definitions — owner-only mutations.
+
+    Org owners can create, update, and delete field definitions for their
+    organization.  All org members can list and retrieve definitions for
+    the current model type.
+    """
+
+    queryset = CustomField.objects.all().order_by('order', 'name')
+    serializer_class = CustomFieldSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        """Return field definitions scoped to the request org via OrgAwareManager."""
+        return CustomField.objects.all().order_by('order', 'name')
+
+    def get_permissions(self):
+        if self.action in ('list', 'retrieve'):
+            return [permissions.IsAuthenticated()]
+        return [permissions.IsAuthenticated(), IsOrgOwner()]
+
+    def perform_create(self, serializer):
+        """Assign the request org to the new field definition."""
         serializer.save(organization=self.request.organization)
 
 

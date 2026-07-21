@@ -320,3 +320,128 @@ class OrganizationMembership(BaseModel):
                     )
 
         super().save(*args, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Custom Fields — dynamic per-tenant field definitions and values
+# ---------------------------------------------------------------------------
+
+ALLOWED_MODEL_NAMES = [
+    ('product', 'Product'),
+    ('customer', 'Customer'),
+    ('supplier', 'Supplier'),
+    ('organization', 'Organization'),
+]
+
+FIELD_TYPES = [
+    ('text', 'Text'),
+    ('number', 'Number'),
+    ('date', 'Date'),
+    ('select', 'Select'),
+]
+
+
+class CustomField(BaseModel):
+    """Per-org field definition for a specific model type.
+
+    Defines a custom field that org owners can add to domain entities
+    without code changes.  Each definition is scoped to one organization
+    and one target model (Product, Customer, Supplier, or Organization).
+    """
+
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name='custom_fields',
+    )
+    model_name = models.CharField(
+        max_length=50,
+        choices=ALLOWED_MODEL_NAMES,
+        help_text='Target model for this custom field.',
+    )
+    name = models.CharField(
+        max_length=100,
+        help_text='Display name for the field (e.g. "SKU", "RFC").',
+    )
+    field_type = models.CharField(
+        max_length=20,
+        choices=FIELD_TYPES,
+        help_text='Determines input rendering and validation.',
+    )
+    required = models.BooleanField(
+        default=False,
+        help_text='If True, the field blocks create/update when empty.',
+    )
+    options = models.JSONField(
+        null=True,
+        blank=True,
+        help_text='For select fields: list of valid choices, e.g. ["S","M","L"].',
+    )
+    order = models.IntegerField(
+        default=0,
+        help_text='Display order (ascending), ties resolved by name.',
+    )
+
+    objects = OrgAwareManager()
+
+    class Meta:
+        unique_together = ['organization', 'model_name', 'name']
+        ordering = ['organization', 'model_name', 'order', 'name']
+
+    def __str__(self):
+        return f'{self.name} ({self.get_model_name_display()}) [{self.organization.name}]'
+
+    def clean(self):
+        super().clean()
+        if self.field_type == 'select':
+            if not self.options or not isinstance(self.options, list) or len(self.options) == 0:
+                raise ValidationError(
+                    {'options': 'Select fields require a non-empty list of options.'}
+                )
+        elif self.options:
+            raise ValidationError(
+                {'options': 'Options are only valid for select fields.'}
+            )
+
+
+class CustomFieldValue(BaseModel):
+    """Stores the actual value for one custom field on one entity.
+
+    Keyed by (entity_type, entity_id, field).  The value is always stored
+    as a string; the mixin handles type-aware casting on read and
+    validation on write.
+    """
+
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name='custom_field_values',
+    )
+    entity_type = models.CharField(
+        max_length=50,
+        choices=ALLOWED_MODEL_NAMES,
+        help_text='Model type of the entity this value belongs to.',
+    )
+    entity_id = models.UUIDField(
+        help_text='UUID of the entity instance.',
+    )
+    field = models.ForeignKey(
+        CustomField,
+        on_delete=models.CASCADE,
+        related_name='values',
+        help_text='The field definition this value corresponds to.',
+    )
+    value = models.TextField(
+        blank=True,
+        default='',
+        help_text='Stored as text; cast by the mixin on read (e.g. number, date).',
+    )
+
+    objects = OrgAwareManager()
+
+    class Meta:
+        unique_together = ['entity_type', 'entity_id', 'field']
+        ordering = ['field__order', 'field__name']
+
+    def __str__(self):
+        return f'{self.field.name} = {self.value[:50]}'
