@@ -262,8 +262,12 @@ class CustomFieldViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        """Return field definitions scoped to the request org via OrgAwareManager."""
-        return CustomField.objects.all().order_by('order', 'name')
+        """Return field definitions scoped to request org and optional model_name."""
+        qs = CustomField.objects.all().order_by('order', 'name')
+        model_name = self.request.query_params.get('model_name')
+        if model_name:
+            qs = qs.filter(model_name=model_name)
+        return qs
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
