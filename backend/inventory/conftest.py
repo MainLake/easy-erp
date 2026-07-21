@@ -1,0 +1,7 @@
+"""pytest configuration for inventory app tests."""
+
+import os
+import django
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+django.setup()
