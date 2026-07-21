@@ -7,6 +7,7 @@ Status transitions are enforced by the service layer, not model save().
 
 from django.db import models
 
+from core.managers import OrgAwareManager
 from core.models import BaseModel
 
 
@@ -15,7 +16,15 @@ class Supplier(BaseModel):
 
     name = models.CharField(max_length=200)
     contact = models.CharField(max_length=255, blank=True, default='')
-    tax_id = models.CharField(max_length=50, unique=True)
+    tax_id = models.CharField(max_length=50)
+    organization = models.ForeignKey(
+        'core.Organization',
+        on_delete=models.PROTECT,
+        null=True,
+        related_name='purchasing_suppliers',
+    )
+
+    objects = OrgAwareManager()
 
     class Meta:
         ordering = ['name']
@@ -44,6 +53,14 @@ class PurchaseOrder(BaseModel):
     )
     order_date = models.DateField(auto_now_add=True)
     notes = models.TextField(blank=True, default='')
+    organization = models.ForeignKey(
+        'core.Organization',
+        on_delete=models.PROTECT,
+        null=True,
+        related_name='purchasing_orders',
+    )
+
+    objects = OrgAwareManager()
 
     VALID_TRANSITIONS = {
         Status.DRAFT: [Status.SENT],

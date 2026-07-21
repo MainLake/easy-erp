@@ -9,6 +9,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 
+from core.managers import OrgAwareManager
 from core.models import BaseModel
 
 
@@ -23,6 +24,14 @@ class Category(BaseModel):
         blank=True,
         related_name='children',
     )
+    organization = models.ForeignKey(
+        'core.Organization',
+        on_delete=models.PROTECT,
+        null=True,
+        related_name='inventory_categories',
+    )
+
+    objects = OrgAwareManager()
 
     class Meta:
         verbose_name_plural = 'categories'
@@ -35,7 +44,7 @@ class Category(BaseModel):
 class Product(BaseModel):
     """Inventory product with unique SKU, cost, and sale price."""
 
-    sku = models.CharField(max_length=50, unique=True)
+    sku = models.CharField(max_length=50)
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True, default='')
     cost = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -47,6 +56,14 @@ class Product(BaseModel):
         blank=True,
         related_name='products',
     )
+    organization = models.ForeignKey(
+        'core.Organization',
+        on_delete=models.PROTECT,
+        null=True,
+        related_name='inventory_products',
+    )
+
+    objects = OrgAwareManager()
 
     class Meta:
         ordering = ['name']
@@ -58,14 +75,27 @@ class Product(BaseModel):
 class Warehouse(BaseModel):
     """Physical storage location.
 
-    Multi-org (Phase 1): a warehouse may have a manager and assistants who
-    are members of the same organization.  The ``branch`` FK is added in
-    Phase 3 once Branch is fully wired into the org hierarchy.
+    Multi-org: a warehouse may have a manager and assistants who
+    are members of the same organization.  The ``branch`` FK connects
+    the warehouse into the org hierarchy.
     """
 
     name = models.CharField(max_length=100)
     location = models.CharField(max_length=255, blank=True, default='')
 
+    organization = models.ForeignKey(
+        'core.Organization',
+        on_delete=models.PROTECT,
+        null=True,
+        related_name='inventory_warehouses',
+    )
+    branch = models.ForeignKey(
+        'core.Branch',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='warehouses',
+    )
     managed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -79,11 +109,38 @@ class Warehouse(BaseModel):
         related_name='assisted_warehouses',
     )
 
+    objects = OrgAwareManager()
+
     class Meta:
         ordering = ['name']
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        """Validate that managed_by and assistants belong to the same org."""
+        super().clean()
+        if self.organization_id is None:
+            return  # cannot validate against None org during migration backfill
+
+        if self.managed_by_id is not None:
+            if not self.managed_by.organizations.filter(id=self.organization_id).exists():
+                raise ValidationError({
+                    'managed_by': (
+                        f'{self.managed_by.email} is not a member of '
+                        f'the selected organization.'
+                    ),
+                })
+
+        if self.pk is not None:
+            for user in self.assistants.all():
+                if not user.organizations.filter(id=self.organization_id).exists():
+                    raise ValidationError({
+                        'assistants': (
+                            f'{user.email} is not a member of '
+                            f'the selected organization.'
+                        ),
+                    })
 
 
 class StockLevel(BaseModel):

@@ -416,6 +416,7 @@ class WarehouseModelTests(TestCase):
         """O6-Manager: GIVEN warehouse / WHEN assigning manager / THEN persisted."""
         wh = Warehouse.objects.create(
             name='WH-01',
+            organization=self.org,
             managed_by=self.user,
         )
         self.assertEqual(wh.managed_by, self.user)
@@ -423,12 +424,12 @@ class WarehouseModelTests(TestCase):
 
     def test_warehouse_manager_can_be_null(self):
         """Warehouse without manager is allowed."""
-        wh = Warehouse.objects.create(name='WH-02')
+        wh = Warehouse.objects.create(name='WH-02', organization=self.org)
         self.assertIsNone(wh.managed_by)
 
     def test_warehouse_add_assistant(self):
         """O6: GIVEN warehouse / WHEN adding assistant / THEN M2M reflects it."""
-        wh = Warehouse.objects.create(name='WH-03')
+        wh = Warehouse.objects.create(name='WH-03', organization=self.org)
         wh.assistants.add(self.assistant)
         self.assertIn(self.assistant, wh.assistants.all())
         self.assertIn(wh, self.assistant.assisted_warehouses.all())
@@ -440,19 +441,21 @@ class WarehouseModelTests(TestCase):
             password='testpass123',
             full_name='Assistant 2',
         )
-        wh = Warehouse.objects.create(name='WH-04')
+        wh = Warehouse.objects.create(name='WH-04', organization=self.org)
         wh.assistants.add(self.assistant, u2)
         self.assertEqual(wh.assistants.count(), 2)
 
     def test_warehouse_assistants_empty_by_default(self):
         """New warehouse has no assistants initially."""
-        wh = Warehouse.objects.create(name='WH-05')
+        wh = Warehouse.objects.create(name='WH-05', organization=self.org)
         self.assertEqual(wh.assistants.count(), 0)
 
     def test_user_reverse_relations(self):
         """User.managed_warehouses and assisted_warehouses filter correctly."""
-        wh1 = Warehouse.objects.create(name='WH-A', managed_by=self.user)
-        wh2 = Warehouse.objects.create(name='WH-B')
+        wh1 = Warehouse.objects.create(
+            name='WH-A', organization=self.org, managed_by=self.user,
+        )
+        wh2 = Warehouse.objects.create(name='WH-B', organization=self.org)
         wh2.assistants.add(self.assistant)
 
         self.assertEqual(self.user.managed_warehouses.count(), 1)
