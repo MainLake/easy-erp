@@ -1,8 +1,9 @@
 """Sales ViewSets — customer CRUD, SO lifecycle with confirm/fulfill actions."""
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError, NotFound
 from rest_framework.response import Response
 
 from .models import Customer, SalesOrder, SOLineItem
@@ -65,12 +66,9 @@ class SalesOrderViewSet(viewsets.ModelViewSet):
         try:
             so = services.confirm_so(so_id=pk)
         except SalesOrder.DoesNotExist:
-            return Response(
-                {'errors': {'detail': 'Sales order not found.'}},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        except ValidationError as e:
-            return Response({'errors': e.message_dict}, status=status.HTTP_400_BAD_REQUEST)
+            raise NotFound(detail='Sales order not found.')
+        except DjangoValidationError as e:
+            raise ValidationError(detail=e.message_dict)
 
         return Response(SalesOrderSerializer(so).data)
 
@@ -80,11 +78,8 @@ class SalesOrderViewSet(viewsets.ModelViewSet):
         try:
             so = services.fulfill_so(so_id=pk)
         except SalesOrder.DoesNotExist:
-            return Response(
-                {'errors': {'detail': 'Sales order not found.'}},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        except ValidationError as e:
-            return Response({'errors': e.message_dict}, status=status.HTTP_400_BAD_REQUEST)
+            raise NotFound(detail='Sales order not found.')
+        except DjangoValidationError as e:
+            raise ValidationError(detail=e.message_dict)
 
         return Response(SalesOrderSerializer(so).data)

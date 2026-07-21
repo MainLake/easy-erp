@@ -1,8 +1,9 @@
 """Inventory ViewSets — standard CRUD plus stock mutation endpoints."""
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from .models import Category, Product, Warehouse, StockLevel, StockMovement
@@ -78,8 +79,8 @@ class ProductViewSet(viewsets.ModelViewSet):
                 quantity=data['quantity'],
                 reason=data['reason'],
             )
-        except ValidationError as e:
-            return Response({'errors': e.message_dict}, status=status.HTTP_400_BAD_REQUEST)
+        except DjangoValidationError as e:
+            raise ValidationError(detail=e.message_dict)
 
         return Response(StockMovementSerializer(movement).data, status=status.HTTP_201_CREATED)
 
@@ -97,8 +98,8 @@ class ProductViewSet(viewsets.ModelViewSet):
                 quantity=data['quantity'],
                 reason=data['reason'],
             )
-        except ValidationError as e:
-            return Response({'errors': e.message_dict}, status=status.HTTP_400_BAD_REQUEST)
+        except DjangoValidationError as e:
+            raise ValidationError(detail=e.message_dict)
 
         return Response(StockMovementSerializer(movement).data, status=status.HTTP_201_CREATED)
 
@@ -117,8 +118,8 @@ class ProductViewSet(viewsets.ModelViewSet):
                 quantity=data['quantity'],
                 reason=data.get('reason', 'manual transfer'),
             )
-        except ValidationError as e:
-            return Response({'errors': e.message_dict}, status=status.HTTP_400_BAD_REQUEST)
+        except DjangoValidationError as e:
+            raise ValidationError(detail=e.message_dict)
 
         return Response(
             {

@@ -1,8 +1,9 @@
 """Purchasing ViewSets — supplier CRUD, PO lifecycle with custom actions."""
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError, NotFound
 from rest_framework.response import Response
 
 from .models import Supplier, PurchaseOrder, POLineItem
@@ -63,12 +64,9 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         try:
             po = services.send_po(po_id=pk)
         except PurchaseOrder.DoesNotExist:
-            return Response(
-                {'errors': {'detail': 'Purchase order not found.'}},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        except ValidationError as e:
-            return Response({'errors': e.message_dict}, status=status.HTTP_400_BAD_REQUEST)
+            raise NotFound(detail='Purchase order not found.')
+        except DjangoValidationError as e:
+            raise ValidationError(detail=e.message_dict)
 
         return Response(PurchaseOrderSerializer(po).data)
 
@@ -78,11 +76,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         try:
             po = services.receive_po(po_id=pk)
         except PurchaseOrder.DoesNotExist:
-            return Response(
-                {'errors': {'detail': 'Purchase order not found.'}},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        except ValidationError as e:
-            return Response({'errors': e.message_dict}, status=status.HTTP_400_BAD_REQUEST)
+            raise NotFound(detail='Purchase order not found.')
+        except DjangoValidationError as e:
+            raise ValidationError(detail=e.message_dict)
 
         return Response(PurchaseOrderSerializer(po).data)
