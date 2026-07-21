@@ -8,8 +8,12 @@ including the admin-implies-all and write-implies-read hierarchies.
 from unittest.mock import MagicMock
 
 from django.test import TestCase
+from rest_framework import status
+from rest_framework.test import APIClient
 
 from core.permissions import OrgRolePermission
+from core.tests import OrgTestMixin
+from core.models import OrganizationMembership, Role
 
 
 # ---------------------------------------------------------------------------
@@ -328,3 +332,116 @@ class OrgRolePermissionObjectTests(TestCase):
             permissions={'inventory': ['read']},
         )
         self.assertFalse(perm.has_object_permission(request, None, None))
+
+
+# ---------------------------------------------------------------------------
+# Membership escalation guard (fix-audit-findings — Phase 1)
+#
+# A member with only ``core:write`` (not org owner) must not be able to
+# escalate their own privileges by setting ``is_owner`` or ``role`` via
+# PATCH on their own membership. Only ``IsOrgOwner`` may change those
+# fields.
+# ---------------------------------------------------------------------------
+
+class MembershipEscalationAPITests(OrgTestMixin, TestCase):
+    """Spec: Membership Role/Ownership Write Authorization."""
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+
+        # A second role to PATCH `role` into — distinct permissions from
+        # self.role (which OrgTestMixin grants full admin on everything).
+        self.other_role = Role.objects.create(
+            name='Limited Role',
+            organization=self.org,
+            permissions={'core': ['write']},
+        )
+
+        # Non-owner member with core:write (via self.role, full admin
+        # includes write) — NOT an org owner.
+        self.member = self.create_org_user(
+            'escalate-member@easyerp.local',
+            full_name='Escalating Member',
+        )
+        self.membership = OrganizationMembership.all_objects.get(
+            user=self.member, organization=self.org,
+        )
+        self.assertFalse(self.membership.is_owner)
+
+        self._login(self.client, self.member)
+
+    def test_non_owner_cannot_set_is_owner_true_on_own_membership(self):
+        """Non-owner PATCHing own membership with is_owner=True is
+        silently ignored (read-only field) — value stays unchanged."""
+        response = self.client.patch(
+            f'/api/v1/memberships/{self.membership.id}/',
+            {'is_owner': True},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.membership.refresh_from_db()
+        self.assertFalse(
+            self.membership.is_owner,
+            'is_owner must remain False — field is read-only for non-owners',
+        )
+
+    def test_non_owner_cannot_change_role_on_own_membership(self):
+        """Non-owner PATCHing own membership with a new role is rejected
+        with 403 — role changes require IsOrgOwner."""
+        response = self.client.patch(
+            f'/api/v1/memberships/{self.membership.id}/',
+            {'role': str(self.other_role.id)},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.membership.refresh_from_db()
+        self.assertEqual(
+            self.membership.role_id, self.role.id,
+            'role must remain unchanged when a non-owner attempts to change it',
+        )
+
+    def test_owner_can_change_another_members_role(self):
+        """Org owner PATCHing another member's role succeeds and persists.
+
+        ``is_owner`` is read-only for everyone (including owners) on this
+        endpoint — no frontend flow ever writes it via the API — so it is
+        silently ignored even when submitted alongside a valid role change.
+        """
+        owner = self.create_org_user(
+            'escalate-owner@easyerp.local',
+            full_name='Owner User',
+            is_default=True,
+        )
+        owner_membership = OrganizationMembership.all_objects.get(
+            user=owner, organization=self.org,
+        )
+        owner_membership.is_owner = True
+        owner_membership.save()
+
+        owner_client = APIClient()
+        self._login(owner_client, owner)
+
+        response = owner_client.patch(
+            f'/api/v1/memberships/{self.membership.id}/',
+            {'role': str(self.other_role.id), 'is_owner': True},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.membership.refresh_from_db()
+        self.assertEqual(self.membership.role_id, self.other_role.id)
+        self.assertFalse(self.membership.is_owner)
+
+    def test_non_owner_can_edit_allowed_field_without_touching_role(self):
+        """Non-owner PATCHing a non-privileged field (is_default) succeeds
+        and does not touch is_owner/role."""
+        response = self.client.patch(
+            f'/api/v1/memberships/{self.membership.id}/',
+            {'is_default': False},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.membership.refresh_from_db()
+        self.assertFalse(self.membership.is_default)
+        self.assertFalse(self.membership.is_owner)
+        self.assertEqual(self.membership.role_id, self.role.id)

@@ -126,7 +126,7 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
             'is_default', 'is_active', 'is_owner',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'organization']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'organization', 'is_owner']
         extra_kwargs = {
             'user': {'required': False},
         }
@@ -153,6 +153,12 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     'invite_email': 'No se encontró un usuario con ese email.',
                 })
+
+        if self.instance is None and not attrs.get('user'):
+            raise serializers.ValidationError({
+                'invite_email': 'Email es requerido.',
+            })
+
         return attrs
 
     def create(self, validated_data):
