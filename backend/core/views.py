@@ -219,14 +219,24 @@ class OrganizationMembershipViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        """Scope by request org (via OrgAwareManager) and optionally by user."""
+        """Scope by request org (via OrgAwareManager) and optionally by user.
+
+        Owners see all members in their org. Regular members only see themselves.
+        """
         qs = (
             OrganizationMembership.objects
             .select_related('user', 'organization', 'role')
             .order_by('organization', 'user')
         )
         if self.action in ('list', 'retrieve') and not self.request.user.is_superuser:
-            qs = qs.filter(user=self.request.user)
+            # Check if user is an owner of the current org
+            is_owner = OrganizationMembership.objects.filter(
+                user=self.request.user,
+                organization=self.request.organization,
+                is_owner=True,
+            ).exists()
+            if not is_owner:
+                qs = qs.filter(user=self.request.user)
         return qs
 
     def get_permissions(self):

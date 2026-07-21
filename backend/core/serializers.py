@@ -111,10 +111,15 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
     ``request.organization`` in the view's ``perform_create``.
     """
 
+    user_name = serializers.SerializerMethodField()
+    user_email = serializers.SerializerMethodField()
+    role_name = serializers.SerializerMethodField()
+
     class Meta:
         model = OrganizationMembership
         fields = [
             'id', 'user', 'organization', 'role',
+            'user_name', 'user_email', 'role_name',
             'is_default', 'is_active', 'is_owner',
             'created_at', 'updated_at',
         ]
@@ -126,6 +131,15 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
                 message='This user already has a membership in this organization.',
             ),
         ]
+
+    def get_user_name(self, obj):
+        return obj.user.full_name if obj.user else None
+
+    def get_user_email(self, obj):
+        return obj.user.email if obj.user else None
+
+    def get_role_name(self, obj):
+        return obj.role.name if obj.role else None
 
 
 # ---------------------------------------------------------------------------
