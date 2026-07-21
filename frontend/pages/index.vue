@@ -88,7 +88,7 @@ function extractTotal(envelope: any): number | null {
 async function fetchStats(): Promise<void> {
   // Fetch product count
   try {
-    const res = await request('/products/?limit=1')
+    const res = await request('/inventory/products/?limit=1')
     if (res.ok) {
       const env = await res.json()
       const total = extractTotal(env)
