@@ -14,20 +14,32 @@ from .serializers import (
     CreditDebitNoteSerializer,
 )
 from . import services
-from core.permissions import IsOperator
+from core.permissions import OrgRolePermission
 
 
 class OrganizationViewSet(viewsets.ModelViewSet):
-    """CRUD for legal entities (Organization)."""
+    """CRUD for legal entities (invoicing Organization)."""
 
     queryset = Organization.objects.all().order_by('name')
     serializer_class = OrganizationSerializer
-    permission_classes = [permissions.IsAuthenticated, IsOperator]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        org = getattr(self.request, 'organization', None)
+        if org:
+            qs = qs.filter(core_organization=org)
+        return qs
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
-            return [permissions.IsAuthenticated()]
-        return [permissions.IsAuthenticated(), IsOperator()]
+            return [permissions.IsAuthenticated(), OrgRolePermission('invoicing', 'read')]
+        if self.action == 'destroy':
+            return [permissions.IsAuthenticated(), OrgRolePermission('invoicing', 'admin')]
+        return [permissions.IsAuthenticated(), OrgRolePermission('invoicing', 'write')]
+
+    def perform_create(self, serializer):
+        serializer.save(core_organization=self.request.organization)
 
 
 class InvoiceViewSet(viewsets.ModelViewSet):
@@ -37,12 +49,17 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         'organization', 'customer', 'sales_order',
     ).prefetch_related('notes').order_by('-created_at')
     serializer_class = InvoiceSerializer
-    permission_classes = [permissions.IsAuthenticated, IsOperator]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
-            return [permissions.IsAuthenticated()]
-        return [permissions.IsAuthenticated(), IsOperator()]
+            return [permissions.IsAuthenticated(), OrgRolePermission('invoicing', 'read')]
+        if self.action == 'destroy':
+            return [permissions.IsAuthenticated(), OrgRolePermission('invoicing', 'admin')]
+        return [permissions.IsAuthenticated(), OrgRolePermission('invoicing', 'write')]
+
+    def perform_create(self, serializer):
+        serializer.save(core_organization=self.request.organization)
 
     @action(detail=False, methods=['post'])
     def generate(self, request):
@@ -51,7 +68,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         Request body: {"sales_order_id": "<uuid>"}
 
         Spec B1: Only fulfilled SOs can be invoiced. Non-fulfilled → 400.
-        Spec B3: Sequential numbering via select_for_update().
+        Spec B3: Sequential numbering via select_for_update(), per-org.
         """
         sales_order_id = request.data.get('sales_order_id')
         if not sales_order_id:
@@ -61,7 +78,10 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            invoice = services.generate_invoice(sales_order_id=sales_order_id)
+            invoice = services.generate_invoice(
+                sales_order_id=sales_order_id,
+                core_organization_id=request.organization.id,
+            )
         except ValidationError as e:
             return Response(
                 {'data': None, 'errors': [{'code': 'invalid_request', 'message': str(e)}]},
@@ -76,12 +96,17 @@ class CreditDebitNoteViewSet(viewsets.ModelViewSet):
 
     queryset = CreditDebitNote.objects.select_related('invoice').order_by('-created_at')
     serializer_class = CreditDebitNoteSerializer
-    permission_classes = [permissions.IsAuthenticated, IsOperator]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
-            return [permissions.IsAuthenticated()]
-        return [permissions.IsAuthenticated(), IsOperator()]
+            return [permissions.IsAuthenticated(), OrgRolePermission('invoicing', 'read')]
+        if self.action == 'destroy':
+            return [permissions.IsAuthenticated(), OrgRolePermission('invoicing', 'admin')]
+        return [permissions.IsAuthenticated(), OrgRolePermission('invoicing', 'write')]
+
+    def perform_create(self, serializer):
+        serializer.save(organization=self.request.organization)
 
     @action(detail=False, methods=['post'])
     def generate_credit(self, request):

@@ -13,20 +13,25 @@ from .serializers import (
     SalesOrderStatusSerializer,
 )
 from . import services
-from core.permissions import IsOperator
+from core.permissions import OrgRolePermission
 
 
 class CustomerViewSet(viewsets.ModelViewSet):
-    """CRUD for customers."""
+    """CRUD for customers — org-scoped."""
 
     queryset = Customer.objects.all().order_by('name')
     serializer_class = CustomerSerializer
-    permission_classes = [permissions.IsAuthenticated, IsOperator]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
-            return [permissions.IsAuthenticated()]
-        return [permissions.IsAuthenticated(), IsOperator()]
+            return [permissions.IsAuthenticated(), OrgRolePermission('sales', 'read')]
+        if self.action == 'destroy':
+            return [permissions.IsAuthenticated(), OrgRolePermission('sales', 'admin')]
+        return [permissions.IsAuthenticated(), OrgRolePermission('sales', 'write')]
+
+    def perform_create(self, serializer):
+        serializer.save(organization=self.request.organization)
 
 
 class SalesOrderViewSet(viewsets.ModelViewSet):
@@ -34,12 +39,17 @@ class SalesOrderViewSet(viewsets.ModelViewSet):
 
     queryset = SalesOrder.objects.prefetch_related('line_items__product', 'line_items__warehouse').order_by('-created_at')
     serializer_class = SalesOrderSerializer
-    permission_classes = [permissions.IsAuthenticated, IsOperator]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
-            return [permissions.IsAuthenticated()]
-        return [permissions.IsAuthenticated(), IsOperator()]
+            return [permissions.IsAuthenticated(), OrgRolePermission('sales', 'read')]
+        if self.action == 'destroy':
+            return [permissions.IsAuthenticated(), OrgRolePermission('sales', 'admin')]
+        return [permissions.IsAuthenticated(), OrgRolePermission('sales', 'write')]
+
+    def perform_create(self, serializer):
+        serializer.save(organization=self.request.organization)
 
     @action(detail=True, methods=['post'])
     def confirm(self, request, pk=None):

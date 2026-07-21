@@ -17,36 +17,46 @@ from .serializers import (
     TransferStockSerializer,
 )
 from . import services
-from core.permissions import IsOperator
+from core.permissions import OrgRolePermission
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
-    """CRUD for product categories."""
+    """CRUD for product categories — org-scoped via OrgAwareManager."""
 
     queryset = Category.objects.all().order_by('name')
     serializer_class = CategorySerializer
-    permission_classes = [permissions.IsAuthenticated, IsOperator]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
-            return [permissions.IsAuthenticated()]
-        return [permissions.IsAuthenticated(), IsOperator()]
+            return [permissions.IsAuthenticated(), OrgRolePermission('inventory', 'read')]
+        if self.action == 'destroy':
+            return [permissions.IsAuthenticated(), OrgRolePermission('inventory', 'admin')]
+        return [permissions.IsAuthenticated(), OrgRolePermission('inventory', 'write')]
+
+    def perform_create(self, serializer):
+        serializer.save(organization=self.request.organization)
 
 
 class ProductViewSet(viewsets.ModelViewSet):
-    """CRUD for products plus stock mutation actions."""
+    """CRUD for products plus stock mutation actions — org-scoped."""
 
     queryset = Product.objects.all().order_by('name')
     serializer_class = ProductSerializer
-    permission_classes = [permissions.IsAuthenticated, IsOperator]
+    permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['name', 'category', 'sku']
     search_fields = ['name', 'sku']
     ordering_fields = ['name', 'sku', 'price', 'created_at']
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve', 'stock'):
-            return [permissions.IsAuthenticated()]
-        return [permissions.IsAuthenticated(), IsOperator()]
+            return [permissions.IsAuthenticated(), OrgRolePermission('inventory', 'read')]
+        if self.action == 'destroy':
+            return [permissions.IsAuthenticated(), OrgRolePermission('inventory', 'admin')]
+        return [permissions.IsAuthenticated(), OrgRolePermission('inventory', 'write')]
+
+    def perform_create(self, serializer):
+        serializer.save(organization=self.request.organization)
 
     @action(detail=True, methods=['post'], url_path='add-stock')
     def add_stock(self, request, pk=None):
@@ -114,8 +124,13 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def stock(self, request):
-        """GET /api/v1/inventory/products/stock/ — current stock levels."""
-        stock_levels = StockLevel.objects.select_related('product', 'warehouse').order_by('product__name', 'warehouse__name')
+        """GET /api/v1/inventory/products/stock/ — current stock levels, org-scoped."""
+        stock_levels = (
+            StockLevel.objects
+            .select_related('product', 'warehouse')
+            .filter(product__organization=request.organization)
+            .order_by('product__name', 'warehouse__name')
+        )
         page = self.paginate_queryset(stock_levels)
         if page is not None:
             return self.get_paginated_response(StockLevelSerializer(page, many=True).data)
@@ -123,21 +138,33 @@ class ProductViewSet(viewsets.ModelViewSet):
 
 
 class WarehouseViewSet(viewsets.ModelViewSet):
-    """CRUD for warehouses."""
+    """CRUD for warehouses — org-scoped."""
 
     queryset = Warehouse.objects.all().order_by('name')
     serializer_class = WarehouseSerializer
-    permission_classes = [permissions.IsAuthenticated, IsOperator]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
-            return [permissions.IsAuthenticated()]
-        return [permissions.IsAuthenticated(), IsOperator()]
+            return [permissions.IsAuthenticated(), OrgRolePermission('inventory', 'read')]
+        if self.action == 'destroy':
+            return [permissions.IsAuthenticated(), OrgRolePermission('inventory', 'admin')]
+        return [permissions.IsAuthenticated(), OrgRolePermission('inventory', 'write')]
+
+    def perform_create(self, serializer):
+        serializer.save(organization=self.request.organization)
 
 
 class StockMovementViewSet(viewsets.ReadOnlyModelViewSet):
-    """Read-only audit trail for stock movements."""
+    """Read-only audit trail for stock movements — org-scoped via product FK."""
 
     queryset = StockMovement.objects.select_related('product', 'warehouse').order_by('-timestamp')
     serializer_class = StockMovementSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        org = getattr(self.request, 'organization', None)
+        if org:
+            qs = qs.filter(product__organization=org)
+        return qs

@@ -13,20 +13,25 @@ from .serializers import (
     PurchaseOrderStatusSerializer,
 )
 from . import services
-from core.permissions import IsOperator
+from core.permissions import OrgRolePermission
 
 
 class SupplierViewSet(viewsets.ModelViewSet):
-    """CRUD for suppliers."""
+    """CRUD for suppliers — org-scoped."""
 
     queryset = Supplier.objects.all().order_by('name')
     serializer_class = SupplierSerializer
-    permission_classes = [permissions.IsAuthenticated, IsOperator]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
-            return [permissions.IsAuthenticated()]
-        return [permissions.IsAuthenticated(), IsOperator()]
+            return [permissions.IsAuthenticated(), OrgRolePermission('purchasing', 'read')]
+        if self.action == 'destroy':
+            return [permissions.IsAuthenticated(), OrgRolePermission('purchasing', 'admin')]
+        return [permissions.IsAuthenticated(), OrgRolePermission('purchasing', 'write')]
+
+    def perform_create(self, serializer):
+        serializer.save(organization=self.request.organization)
 
 
 class PurchaseOrderViewSet(viewsets.ModelViewSet):
@@ -34,12 +39,17 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
     queryset = PurchaseOrder.objects.prefetch_related('line_items__product').order_by('-created_at')
     serializer_class = PurchaseOrderSerializer
-    permission_classes = [permissions.IsAuthenticated, IsOperator]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
-            return [permissions.IsAuthenticated()]
-        return [permissions.IsAuthenticated(), IsOperator()]
+            return [permissions.IsAuthenticated(), OrgRolePermission('purchasing', 'read')]
+        if self.action == 'destroy':
+            return [permissions.IsAuthenticated(), OrgRolePermission('purchasing', 'admin')]
+        return [permissions.IsAuthenticated(), OrgRolePermission('purchasing', 'write')]
+
+    def perform_create(self, serializer):
+        serializer.save(organization=self.request.organization)
 
     @action(detail=True, methods=['post'])
     def send(self, request, pk=None):
