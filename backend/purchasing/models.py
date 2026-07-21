@@ -5,6 +5,8 @@ Purchase Order lifecycle: draft → sent → received.
 Status transitions are enforced by the service layer, not model save().
 """
 
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models
 
@@ -42,6 +44,12 @@ class PurchaseOrder(BaseModel):
         SENT = 'sent', 'Sent'
         RECEIVED = 'received', 'Received'
 
+    class ApprovalStatus(models.TextChoices):
+        NONE = 'none', 'None'
+        PENDING = 'pending', 'Pending'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
+
     supplier = models.ForeignKey(
         Supplier,
         on_delete=models.PROTECT,
@@ -68,6 +76,30 @@ class PurchaseOrder(BaseModel):
         related_name='created_purchase_orders',
     )
 
+    # Order-approval-rules feature: threshold-gated approval workflow.
+    approval_status = models.CharField(
+        max_length=20,
+        choices=ApprovalStatus.choices,
+        default=ApprovalStatus.NONE,
+        help_text='Set by core.approvals.evaluate_gate when a matching '
+                   'ApprovalRule requires sign-off before confirm/send.',
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='requested_purchase_orders',
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_purchase_orders',
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
     objects = OrgAwareManager()
 
     VALID_TRANSITIONS = {
@@ -81,6 +113,14 @@ class PurchaseOrder(BaseModel):
 
     def __str__(self):
         return f'PO #{self.id.hex[:8]} — {self.supplier.name}'
+
+    @property
+    def total(self):
+        """Sum of quantity * unit_cost across all line items."""
+        return sum(
+            (li.quantity * li.unit_cost for li in self.line_items.all()),
+            Decimal('0'),
+        )
 
 
 class POLineItem(BaseModel):

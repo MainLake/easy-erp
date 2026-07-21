@@ -8,6 +8,7 @@ Spec coverage:
 """
 
 import json
+from decimal import Decimal
 
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -385,3 +386,39 @@ class PurchaseOrderReceiptTests(OrgTestMixin, TestCase):
             product=self.product_a, warehouse=default_wh,
         )
         self.assertEqual(level.quantity, 5)
+
+
+class PurchaseOrderTotalPropertyTests(OrgTestMixin, TestCase):
+    """`total` property: sum(quantity * unit_cost) across line items."""
+
+    def setUp(self):
+        super().setUp()
+        self.supplier = Supplier.objects.create(
+            name='Total Supplier', tax_id='TOTAL-TAX-001', organization=self.org,
+        )
+        self.product_a = Product.objects.create(
+            sku='TOTAL-PO-SKU-A', name='Part A', cost='5', price='30',
+            organization=self.org,
+        )
+        self.product_b = Product.objects.create(
+            sku='TOTAL-PO-SKU-B', name='Part B', cost='5', price='15',
+            organization=self.org,
+        )
+
+    def test_total_sums_line_items(self):
+        """GIVEN a PO with two line items / WHEN reading `.total` / THEN it
+        equals sum(quantity * unit_cost) across all lines."""
+        po = PurchaseOrder.objects.create(supplier=self.supplier, organization=self.org)
+        po.line_items.create(
+            product=self.product_a, quantity=4, unit_cost=Decimal('20.00'),
+        )
+        po.line_items.create(
+            product=self.product_b, quantity=1, unit_cost=Decimal('10.00'),
+        )
+        self.assertEqual(po.total, Decimal('90.00'))
+
+    def test_total_is_zero_with_no_line_items(self):
+        """GIVEN a PO with no line items / WHEN reading `.total` / THEN it
+        is zero (proves the sum over an empty queryset, not a stub)."""
+        po = PurchaseOrder.objects.create(supplier=self.supplier, organization=self.org)
+        self.assertEqual(po.total, Decimal('0'))

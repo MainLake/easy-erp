@@ -5,6 +5,8 @@ Sales Order lifecycle: draft → confirmed → fulfilled.
 Status transitions are enforced by the service layer.
 """
 
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models
 
@@ -42,6 +44,12 @@ class SalesOrder(BaseModel):
         CONFIRMED = 'confirmed', 'Confirmed'
         FULFILLED = 'fulfilled', 'Fulfilled'
 
+    class ApprovalStatus(models.TextChoices):
+        NONE = 'none', 'None'
+        PENDING = 'pending', 'Pending'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
+
     customer = models.ForeignKey(
         Customer,
         on_delete=models.PROTECT,
@@ -68,6 +76,30 @@ class SalesOrder(BaseModel):
         related_name='created_sales_orders',
     )
 
+    # Order-approval-rules feature: threshold-gated approval workflow.
+    approval_status = models.CharField(
+        max_length=20,
+        choices=ApprovalStatus.choices,
+        default=ApprovalStatus.NONE,
+        help_text='Set by core.approvals.evaluate_gate when a matching '
+                   'ApprovalRule requires sign-off before confirm/send.',
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='requested_sales_orders',
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_sales_orders',
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
     objects = OrgAwareManager()
 
     VALID_TRANSITIONS = {
@@ -81,6 +113,14 @@ class SalesOrder(BaseModel):
 
     def __str__(self):
         return f'SO #{self.id.hex[:8]} — {self.customer.name}'
+
+    @property
+    def total(self):
+        """Sum of quantity * unit_price across all line items."""
+        return sum(
+            (li.quantity * li.unit_price for li in self.line_items.all()),
+            Decimal('0'),
+        )
 
 
 class SOLineItem(BaseModel):
