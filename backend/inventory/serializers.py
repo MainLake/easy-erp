@@ -3,6 +3,7 @@
 from rest_framework import serializers
 
 from core.managers import get_current_organization
+from core.serializers import CustomFieldsMixin
 from .models import Category, Product, Warehouse, StockLevel, StockMovement
 from . import services
 
@@ -14,7 +15,9 @@ class CategorySerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
-class ProductSerializer(serializers.ModelSerializer):
+class ProductSerializer(CustomFieldsMixin, serializers.ModelSerializer):
+    MODEL_NAME = 'product'
+
     class Meta:
         model = Product
         fields = ['id', 'sku', 'name', 'description', 'cost', 'price', 'category', 'created_at', 'updated_at']

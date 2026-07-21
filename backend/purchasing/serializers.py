@@ -3,10 +3,13 @@
 from rest_framework import serializers
 
 from core.managers import get_current_organization
+from core.serializers import CustomFieldsMixin
 from .models import Supplier, PurchaseOrder, POLineItem
 
 
-class SupplierSerializer(serializers.ModelSerializer):
+class SupplierSerializer(CustomFieldsMixin, serializers.ModelSerializer):
+    MODEL_NAME = 'supplier'
+
     class Meta:
         model = Supplier
         fields = ['id', 'name', 'contact', 'tax_id', 'created_at', 'updated_at']

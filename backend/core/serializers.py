@@ -61,22 +61,6 @@ class UserSerializer(serializers.ModelSerializer):
 # Multi-org serializers (spec O1, R1, R2)
 # ---------------------------------------------------------------------------
 
-class OrganizationSerializer(serializers.ModelSerializer):
-    """CRUD for multi-tenant organizations.
-
-    tax_id uniqueness is enforced at the model level (unique=True).
-    """
-
-    class Meta:
-        model = Organization
-        fields = [
-            'id', 'name', 'tax_id', 'is_active', 'settings',
-            'legal_name', 'tax_regime', 'fiscal_address',
-            'created_at', 'updated_at',
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
-
-
 class BranchSerializer(serializers.ModelSerializer):
     """CRUD for physical branches belonging to an organization.
 
@@ -565,3 +549,26 @@ class CustomFieldsMixin:
                 field=field_def,
                 defaults={'value': value},
             )
+
+
+# ---------------------------------------------------------------------------
+# OrganizationSerializer — placed after CustomFieldsMixin to resolve import
+# order (mixin must be defined before use).
+# ---------------------------------------------------------------------------
+
+class OrganizationSerializer(CustomFieldsMixin, serializers.ModelSerializer):
+    """CRUD for multi-tenant organizations.
+
+    tax_id uniqueness is enforced at the model level (unique=True).
+    """
+
+    MODEL_NAME = 'organization'
+
+    class Meta:
+        model = Organization
+        fields = [
+            'id', 'name', 'tax_id', 'is_active', 'settings',
+            'legal_name', 'tax_regime', 'fiscal_address',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']

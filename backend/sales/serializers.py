@@ -3,10 +3,13 @@
 from rest_framework import serializers
 
 from core.managers import get_current_organization
+from core.serializers import CustomFieldsMixin
 from .models import Customer, SalesOrder, SOLineItem
 
 
-class CustomerSerializer(serializers.ModelSerializer):
+class CustomerSerializer(CustomFieldsMixin, serializers.ModelSerializer):
+    MODEL_NAME = 'customer'
+
     class Meta:
         model = Customer
         fields = ['id', 'name', 'contact', 'tax_id', 'created_at', 'updated_at']
