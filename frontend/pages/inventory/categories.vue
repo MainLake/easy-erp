@@ -131,7 +131,11 @@ async function handleSave(payload: Record<string, any>) {
 
 async function handleDelete(row: any) {
   if (!confirm(`¿Eliminar categoría "${row.name}"?`)) return
-  await request(`/inventory/categories/${row.id}/`, { method: 'DELETE' })
+  const res = await request(`/inventory/categories/${row.id}/`, { method: 'DELETE' })
+  if (!res.ok) {
+    const e = await res.json()
+    alert(e.errors?.[0]?.message || 'Error al eliminar')
+  }
   fetchData()
 }
 </script>

@@ -232,13 +232,21 @@ async function handleSave() {
 
 async function handleSend(row: any) {
   if (!confirm(`¿Enviar OC a "${row.supplier_name}"?`)) return
-  await request(`/purchasing/orders/${row.id}/send/`, { method: 'POST' })
+  const res = await request(`/purchasing/orders/${row.id}/send/`, { method: 'POST' })
+  if (!res.ok) {
+    const e = await res.json()
+    alert(e.errors?.[0]?.message || 'Error al enviar la orden')
+  }
   fetchData()
 }
 
 async function handleReceive(row: any) {
   if (!confirm(`¿Marcar OC como recibida? Se incrementará la existencia.`)) return
-  await request(`/purchasing/orders/${row.id}/receive/`, { method: 'POST' })
+  const res = await request(`/purchasing/orders/${row.id}/receive/`, { method: 'POST' })
+  if (!res.ok) {
+    const e = await res.json()
+    alert(e.errors?.[0]?.message || 'Error al recibir la orden')
+  }
   fetchData()
 }
 </script>

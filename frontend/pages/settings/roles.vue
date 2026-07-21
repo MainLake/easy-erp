@@ -118,7 +118,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -180,13 +180,16 @@ async function fetchRoles() {
   }
 }
 
-onMounted(() => {
-  if (!isOwner.value) {
-    navigateTo('/')
-    return
+// Wait for user to be loaded, then check ownership
+watch(() => user.value, (val) => {
+  if (val) {
+    if (!isOwner.value) {
+      navigateTo('/')
+    } else {
+      fetchRoles()
+    }
   }
-  fetchRoles()
-})
+}, { immediate: true })
 
 // ---- permission matrix helpers ----
 function hasChecked(mod: string, action: string): boolean {

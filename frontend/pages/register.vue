@@ -43,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch } from 'vue'
 
 definePageMeta({ layout: 'auth' })
 
@@ -57,12 +57,10 @@ const loading = ref(false)
 
 const { register, user } = useAuth()
 
-onMounted(async () => {
-  // If already authenticated, redirect away
-  if (user.value?.active_membership) {
-    await navigateTo('/')
-  }
-})
+// Wait for user to be loaded, then redirect if already authenticated
+watch(() => user.value, (val) => {
+  if (val?.active_membership) navigateTo('/')
+}, { immediate: true })
 
 async function handleRegister() {
   error.value = ''
