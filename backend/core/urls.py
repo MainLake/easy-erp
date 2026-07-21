@@ -3,10 +3,20 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .jwt_serializers import CustomTokenObtainPairSerializer
-from .views import UserViewSet
+from .views import (
+    BranchViewSet,
+    OrganizationMembershipViewSet,
+    OrganizationViewSet,
+    RoleViewSet,
+    UserViewSet,
+)
 
 router = DefaultRouter()
 router.register(r'users', UserViewSet)
+router.register(r'orgs', OrganizationViewSet)
+router.register(r'branches', BranchViewSet)
+router.register(r'roles', RoleViewSet)
+router.register(r'memberships', OrganizationMembershipViewSet)
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):

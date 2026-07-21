@@ -21,7 +21,7 @@ class BaseModel(models.Model):
 # Permission validation — shared by Role.clean()
 # ---------------------------------------------------------------------------
 
-VALID_MODULES = {'inventory', 'purchasing', 'sales', 'invoicing'}
+VALID_MODULES = {'core', 'inventory', 'purchasing', 'sales', 'invoicing'}
 VALID_ACTIONS = {'read', 'write', 'admin'}
 
 

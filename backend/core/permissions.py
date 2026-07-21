@@ -74,7 +74,7 @@ class OrgRolePermission(BasePermission):
     - ``read``   → grants list / retrieve only
     """
 
-    MODULES = {'inventory', 'purchasing', 'sales', 'invoicing'}
+    MODULES = {'core', 'inventory', 'purchasing', 'sales', 'invoicing'}
     ACTIONS = {'read', 'write', 'admin'}
 
     # ------------------------------------------------------------------
