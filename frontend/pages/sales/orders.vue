@@ -60,7 +60,7 @@
               <tbody>
                 <tr v-for="(li, idx) in form.line_items" :key="idx">
                   <td>
-                    <select v-model="li.product" class="form-input form-input-sm">
+                    <select v-model="li.product" class="form-input form-input-sm" @change="applyProductPrice(li)">
                       <option value="">-- Producto --</option>
                       <option v-for="p in products" :key="p.id" :value="p.id">{{ p.name }}</option>
                     </select>
@@ -215,6 +215,11 @@ function openCreate() {
   form.line_items = [{ product: '', warehouse: '', quantity: 1, unit_price: 0 }]
   saveError.value = ''
   modalOpen.value = true
+}
+
+function applyProductPrice(li: any) {
+  const product = products.value.find((p: any) => p.id === li.product)
+  if (product) li.unit_price = Number(product.price)
 }
 
 function openView(row: any) {
