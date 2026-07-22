@@ -12,8 +12,9 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework import status
 
-from core.models import ApprovalRule, Role
+from core.models import ApprovalRule, Organization, Role
 from core.tests import OrgTestMixin
+from inventory.models import Product
 
 
 class ApprovalRuleViewSetPermissionTests(OrgTestMixin, TestCase):
@@ -76,3 +77,59 @@ class ApprovalRuleViewSetPermissionTests(OrgTestMixin, TestCase):
         self._login(client, member)
         resp = client.get('/api/v1/approval-rules/')
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_create_with_cross_org_product_rejected(self):
+        """Owner POSTing a rule referencing a product from another org
+        gets 400 and no rule is persisted."""
+        other_org = Organization.objects.create(
+            name='Other Org', tax_id='OTHER-ORG-VIEWSET-001',
+        )
+        foreign_product = Product.objects.create(
+            sku='VIEWSET-FOREIGN-SKU', name='Foreign Widget', cost='5', price='10',
+            organization=other_org,
+        )
+        owner = self.create_org_user('cross-org-owner@easyerp.local', role=self.plain_role)
+        membership = owner.memberships.get(organization=self.org)
+        membership.is_owner = True
+        membership.save()
+
+        client = APIClient()
+        self._login(client, owner)
+        payload = {**self._payload(), 'product': str(foreign_product.id)}
+        resp = client.post('/api/v1/approval-rules/', payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(ApprovalRule.objects.filter(organization=self.org).exists())
+
+    def test_create_and_update_accept_and_return_min_quantity_and_product(self):
+        """Owner POSTing a rule with min_quantity + product gets them back
+        in the response and can PATCH to change them."""
+        product = Product.objects.create(
+            sku='VIEWSET-SKU-001', name='Widget', cost='5', price='10',
+            organization=self.org,
+        )
+        other_product = Product.objects.create(
+            sku='VIEWSET-SKU-002', name='Gadget', cost='5', price='20',
+            organization=self.org,
+        )
+        owner = self.create_org_user('rule-fields-owner@easyerp.local', role=self.plain_role)
+        membership = owner.memberships.get(organization=self.org)
+        membership.is_owner = True
+        membership.save()
+
+        client = APIClient()
+        self._login(client, owner)
+        payload = {**self._payload(), 'min_quantity': 50, 'product': str(product.id)}
+        resp = client.post('/api/v1/approval-rules/', payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data['min_quantity'], 50)
+        self.assertEqual(resp.data['product'], product.id)
+
+        rule_id = resp.data['id']
+        patch_resp = client.patch(
+            f'/api/v1/approval-rules/{rule_id}/',
+            {'min_quantity': 75, 'product': str(other_product.id)},
+            format='json',
+        )
+        self.assertEqual(patch_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(patch_resp.data['min_quantity'], 75)
+        self.assertEqual(patch_resp.data['product'], other_product.id)

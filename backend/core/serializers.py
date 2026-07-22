@@ -382,10 +382,21 @@ class ApprovalRuleSerializer(serializers.ModelSerializer):
         model = ApprovalRule
         fields = [
             'id', 'organization', 'order_type', 'min_amount',
+            'min_quantity', 'product',
             'approver_role', 'approver_users', 'is_active',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'organization']
+
+    def validate(self, data):
+        product = data.get('product', getattr(self.instance, 'product', None))
+        if product is not None:
+            organization = self.context['request'].organization
+            if product.organization_id != organization.id:
+                raise serializers.ValidationError(
+                    {'product': 'Product must belong to the same organization.'}
+                )
+        return data
 
 
 # ---------------------------------------------------------------------------

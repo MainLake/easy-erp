@@ -481,7 +481,22 @@ class ApprovalRule(BaseModel):
     min_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
+        null=True,
+        blank=True,
         help_text='Orders with total >= this amount require approval.',
+    )
+    min_quantity = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text='Orders whose (product-scoped or total) quantity >= this require approval.',
+    )
+    product = models.ForeignKey(
+        'inventory.Product',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='approval_rules',
+        help_text='If set, rule only applies to orders containing this product.',
     )
     approver_role = models.ForeignKey(
         Role,
@@ -507,3 +522,8 @@ class ApprovalRule(BaseModel):
 
     def __str__(self):
         return f'{self.get_order_type_display()} >= {self.min_amount} [{self.organization.name}]'
+
+    def clean(self):
+        super().clean()
+        if self.product_id is not None and self.product.organization_id != self.organization_id:
+            raise ValidationError({'product': 'Product must belong to the same organization.'})

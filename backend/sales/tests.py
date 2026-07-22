@@ -539,6 +539,26 @@ class SalesOrderTotalPropertyTests(OrgTestMixin, TestCase):
         so = SalesOrder.objects.create(customer=self.customer, organization=self.org)
         self.assertEqual(so.total, Decimal('0'))
 
+    def test_total_quantity_sums_line_items(self):
+        """GIVEN a SO with two line items / WHEN reading `.total_quantity`
+        / THEN it equals sum(quantity) across all lines."""
+        so = SalesOrder.objects.create(customer=self.customer, organization=self.org)
+        so.line_items.create(
+            product=self.product_a, quantity=3, unit_price=Decimal('30.00'),
+            warehouse=self.warehouse,
+        )
+        so.line_items.create(
+            product=self.product_b, quantity=2, unit_price=Decimal('15.00'),
+            warehouse=self.warehouse,
+        )
+        self.assertEqual(so.total_quantity, 5)
+
+    def test_total_quantity_is_zero_with_no_line_items(self):
+        """GIVEN a SO with no line items / WHEN reading `.total_quantity`
+        / THEN it is zero."""
+        so = SalesOrder.objects.create(customer=self.customer, organization=self.org)
+        self.assertEqual(so.total_quantity, 0)
+
 
 class SalesOrderApprovalGateTests(OrgTestMixin, TestCase):
     """Phase 2: confirm_so gate wiring + approve/reject actions (spec:
