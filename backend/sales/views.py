@@ -14,6 +14,7 @@ from .serializers import (
     SalesOrderStatusSerializer,
 )
 from . import services
+from core import approvals
 from core.permissions import OrgRolePermission
 
 
@@ -65,9 +66,13 @@ class SalesOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def confirm(self, request, pk=None):
-        """POST /api/v1/sales/orders/{id}/confirm/ — draft → confirmed (stock check)"""
+        """POST /api/v1/sales/orders/{id}/confirm/ — draft → confirmed (stock check).
+
+        If an active ApprovalRule gates this order, the transition is
+        blocked instead: response is 200 with approval_status='pending'
+        and status unchanged (frontend branches on approval_status)."""
         try:
-            so = services.confirm_so(so_id=pk)
+            so = services.confirm_so(so_id=pk, user=request.user)
         except SalesOrder.DoesNotExist:
             raise NotFound(detail='Sales order not found.')
         except DjangoValidationError as e:
@@ -85,4 +90,39 @@ class SalesOrderViewSet(viewsets.ModelViewSet):
         except DjangoValidationError as e:
             raise ValidationError(detail=e.message_dict)
 
+        return Response(SalesOrderSerializer(so).data)
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        """POST /api/v1/sales/orders/{id}/approve/ — approve a pending order.
+
+        Authority-gated via core.approvals.can_approve (403 if unauthorized).
+        On success, re-invokes confirm_so so the now-approved order
+        completes its original transition in the same call."""
+        try:
+            so = SalesOrder.objects.get(pk=pk)
+        except SalesOrder.DoesNotExist:
+            raise NotFound(detail='Sales order not found.')
+
+        approvals.approve_order(order=so, order_type='sales_order', user=request.user)
+
+        try:
+            so = services.confirm_so(so_id=so.id, user=request.user)
+        except DjangoValidationError as e:
+            raise ValidationError(detail=e.message_dict)
+
+        return Response(SalesOrderSerializer(so).data)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        """POST /api/v1/sales/orders/{id}/reject/ — reject a pending order.
+
+        Authority-gated via core.approvals.can_approve (403 if unauthorized).
+        Does NOT auto-retry the blocked transition."""
+        try:
+            so = SalesOrder.objects.get(pk=pk)
+        except SalesOrder.DoesNotExist:
+            raise NotFound(detail='Sales order not found.')
+
+        so = approvals.reject_order(order=so, order_type='sales_order', user=request.user)
         return Response(SalesOrderSerializer(so).data)

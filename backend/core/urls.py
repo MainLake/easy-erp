@@ -4,6 +4,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .jwt_serializers import CustomTokenObtainPairSerializer
 from .views import (
+    ApprovalRuleViewSet,
     BranchViewSet,
     CustomFieldViewSet,
     OrganizationMembershipViewSet,
@@ -21,6 +22,7 @@ router.register(r'branches', BranchViewSet)
 router.register(r'roles', RoleViewSet)
 router.register(r'memberships', OrganizationMembershipViewSet)
 router.register(r'custom-fields', CustomFieldViewSet)
+router.register(r'approval-rules', ApprovalRuleViewSet)
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):

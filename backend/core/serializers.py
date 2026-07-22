@@ -5,6 +5,7 @@ from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
 
 from .models import (
+    ApprovalRule,
     Branch,
     CustomField,
     CustomFieldValue,
@@ -363,6 +364,28 @@ class CustomFieldSerializer(serializers.ModelSerializer):
                     )
 
         return data
+
+
+# ---------------------------------------------------------------------------
+# ApprovalRuleSerializer — CRUD for order-approval threshold rules
+# ---------------------------------------------------------------------------
+
+
+class ApprovalRuleSerializer(serializers.ModelSerializer):
+    """CRUD for per-org, per-order-type approval threshold rules.
+
+    The ``organization`` field is read-only — it is assigned from
+    ``request.organization`` in the view's ``perform_create``.
+    """
+
+    class Meta:
+        model = ApprovalRule
+        fields = [
+            'id', 'organization', 'order_type', 'min_amount',
+            'approver_role', 'approver_users', 'is_active',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'organization']
 
 
 # ---------------------------------------------------------------------------

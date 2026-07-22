@@ -6,8 +6,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.db import transaction
 
-from .models import Branch, CustomField, Organization, OrganizationMembership, Role, User
+from .models import ApprovalRule, Branch, CustomField, Organization, OrganizationMembership, Role, User
 from .serializers import (
+    ApprovalRuleSerializer,
     BranchSerializer,
     CustomFieldSerializer,
     MeSerializer,
@@ -17,7 +18,7 @@ from .serializers import (
     RoleSerializer,
     UserSerializer,
 )
-from .permissions import IsOrgOwner, OrgRolePermission
+from .permissions import IsOrgOwner, IsOrgOwnerOrModuleAdmin, OrgRolePermission
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +282,30 @@ class CustomFieldViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """Assign the request org to the new field definition."""
+        serializer.save(organization=self.request.organization)
+
+
+class ApprovalRuleViewSet(viewsets.ModelViewSet):
+    """CRUD for per-org order-approval threshold rules.
+
+    Owner OR ``core:admin`` may create/update/destroy. All org members
+    can list and retrieve rules for the current organization.
+    """
+
+    queryset = ApprovalRule.objects.all()
+    serializer_class = ApprovalRuleSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return ApprovalRule.objects.all().order_by('order_type')
+
+    def get_permissions(self):
+        if self.action in ('list', 'retrieve'):
+            return [permissions.IsAuthenticated()]
+        return [permissions.IsAuthenticated(), IsOrgOwnerOrModuleAdmin('core')]
+
+    def perform_create(self, serializer):
+        """Assign the request org to the new rule."""
         serializer.save(organization=self.request.organization)
 
 

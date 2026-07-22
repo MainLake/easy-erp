@@ -14,6 +14,7 @@ from .serializers import (
     PurchaseOrderStatusSerializer,
 )
 from . import services
+from core import approvals
 from core.permissions import OrgRolePermission
 
 
@@ -63,9 +64,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def send(self, request, pk=None):
-        """POST /api/v1/purchasing/orders/{id}/send/ — draft → sent"""
+        """POST /api/v1/purchasing/orders/{id}/send/ — draft → sent.
+
+        If an active ApprovalRule gates this order, the transition is
+        blocked instead: response is 200 with approval_status='pending'
+        and status unchanged (frontend branches on approval_status)."""
         try:
-            po = services.send_po(po_id=pk)
+            po = services.send_po(po_id=pk, user=request.user)
         except PurchaseOrder.DoesNotExist:
             raise NotFound(detail='Purchase order not found.')
         except DjangoValidationError as e:
@@ -83,4 +88,39 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         except DjangoValidationError as e:
             raise ValidationError(detail=e.message_dict)
 
+        return Response(PurchaseOrderSerializer(po).data)
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        """POST /api/v1/purchasing/orders/{id}/approve/ — approve a pending order.
+
+        Authority-gated via core.approvals.can_approve (403 if unauthorized).
+        On success, re-invokes send_po so the now-approved order completes
+        its original transition in the same call."""
+        try:
+            po = PurchaseOrder.objects.get(pk=pk)
+        except PurchaseOrder.DoesNotExist:
+            raise NotFound(detail='Purchase order not found.')
+
+        approvals.approve_order(order=po, order_type='purchase_order', user=request.user)
+
+        try:
+            po = services.send_po(po_id=po.id, user=request.user)
+        except DjangoValidationError as e:
+            raise ValidationError(detail=e.message_dict)
+
+        return Response(PurchaseOrderSerializer(po).data)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        """POST /api/v1/purchasing/orders/{id}/reject/ — reject a pending order.
+
+        Authority-gated via core.approvals.can_approve (403 if unauthorized).
+        Does NOT auto-retry the blocked transition."""
+        try:
+            po = PurchaseOrder.objects.get(pk=pk)
+        except PurchaseOrder.DoesNotExist:
+            raise NotFound(detail='Purchase order not found.')
+
+        po = approvals.reject_order(order=po, order_type='purchase_order', user=request.user)
         return Response(PurchaseOrderSerializer(po).data)

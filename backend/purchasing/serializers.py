@@ -65,10 +65,12 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             'id', 'supplier', 'supplier_name', 'status',
             'order_date', 'notes', 'line_items', 'line_items_write',
             'created_by', 'created_by_name',
+            'approval_status', 'requested_by', 'approved_by', 'approved_at',
             'created_at', 'updated_at',
         ]
         read_only_fields = [
             'id', 'status', 'order_date', 'created_by',
+            'approval_status', 'requested_by', 'approved_by', 'approved_at',
             'created_at', 'updated_at',
         ]
 

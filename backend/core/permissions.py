@@ -126,3 +126,33 @@ class IsOrgOwner(BasePermission):
             organization=org,
             is_owner=True,
         ).exists()
+
+
+# ============================================================================
+# IsOrgOwnerOrModuleAdmin — owner OR module-admin guard (ApprovalRule CRUD)
+# ============================================================================
+
+
+class IsOrgOwnerOrModuleAdmin(BasePermission):
+    """Grant access to organization owners OR users holding 'admin' on
+    *module* for the active organization.
+
+    Usage::
+
+        permission_classes = [IsOrgOwnerOrModuleAdmin('core')]
+
+    Unlike ``IsOrgOwner``, this does not require ownership — a member
+    whose role grants ``admin`` on *module* (or the ``*`` wildcard) also
+    passes.
+    """
+
+    def __init__(self, module):
+        self.module = module
+
+    def has_permission(self, request, view):
+        if IsOrgOwner().has_permission(request, view):
+            return True
+        return OrgRolePermission(self.module, 'admin').has_permission(request, view)
+
+    def has_object_permission(self, request, view, obj):
+        return self.has_permission(request, view)

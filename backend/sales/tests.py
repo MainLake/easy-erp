@@ -538,3 +538,120 @@ class SalesOrderTotalPropertyTests(OrgTestMixin, TestCase):
         is zero (proves the sum over an empty queryset, not a stub)."""
         so = SalesOrder.objects.create(customer=self.customer, organization=self.org)
         self.assertEqual(so.total, Decimal('0'))
+
+
+class SalesOrderApprovalGateTests(OrgTestMixin, TestCase):
+    """Phase 2: confirm_so gate wiring + approve/reject actions (spec:
+    Threshold gate blocks confirm above min_amount, Approver authority
+    resolution, Unauthorized approval attempts are rejected)."""
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self.operator = self.create_org_user(
+            'approval-operator@easyerp.local', full_name='Operator User',
+        )
+        self._login(self.client, self.operator)
+
+        self.customer = Customer.objects.create(
+            name='Approval Customer', tax_id='APPROVAL-TAX-001', organization=self.org,
+        )
+        self.product = Product.objects.create(
+            sku='APPROVAL-SKU-001', name='Gadget', cost='10', price='100',
+            organization=self.org,
+        )
+        inventory_services.add_stock(
+            product_id=self.product.id, warehouse_id=self.warehouse.id,
+            quantity=100, reason='approval test stock',
+        )
+
+    def _create_so(self, quantity=10, unit_price='100.00'):
+        resp = self.client.post('/api/v1/sales/orders/', {
+            'customer': str(self.customer.id),
+            'line_items_write': [{
+                'product': str(self.product.id),
+                'warehouse': str(self.warehouse.id),
+                'quantity': quantity,
+                'unit_price': unit_price,
+            }],
+        }, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        return resp.data['id']
+
+    def test_confirm_without_rule_unaffected(self):
+        """Zero-rules-configured: confirm proceeds unchanged, approval_status stays 'none'."""
+        so_id = self._create_so()
+        resp = self.client.post(f'/api/v1/sales/orders/{so_id}/confirm/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['status'], 'confirmed')
+        self.assertEqual(resp.data['approval_status'], 'none')
+
+    def test_confirm_over_threshold_blocks_and_returns_pending(self):
+        """Order total (1000) >= min_amount (1000) -> confirm blocked, 200 + pending."""
+        from core.models import ApprovalRule
+        ApprovalRule.objects.create(
+            organization=self.org, order_type='sales_order',
+            min_amount=Decimal('1000.00'),
+        )
+        so_id = self._create_so(quantity=10, unit_price='100.00')
+
+        resp = self.client.post(f'/api/v1/sales/orders/{so_id}/confirm/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['status'], 'draft')
+        self.assertEqual(resp.data['approval_status'], 'pending')
+
+        so = SalesOrder.objects.get(id=so_id)
+        self.assertEqual(so.status, 'draft')
+        self.assertEqual(so.approval_status, 'pending')
+        self.assertEqual(so.requested_by_id, self.operator.id)
+
+    def test_approve_by_owner_completes_transition(self):
+        """Owner approves a pending order -> approval_status='approved' and a
+        subsequent confirm (auto re-invoked by the approve action) completes."""
+        from core.models import ApprovalRule
+        ApprovalRule.objects.create(
+            organization=self.org, order_type='sales_order',
+            min_amount=Decimal('1000.00'),
+        )
+        so_id = self._create_so(quantity=10, unit_price='100.00')
+        self.client.post(f'/api/v1/sales/orders/{so_id}/confirm/')
+
+        owner_membership = self.operator.memberships.get(organization=self.org)
+        owner_membership.is_owner = True
+        owner_membership.save()
+
+        resp = self.client.post(f'/api/v1/sales/orders/{so_id}/approve/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['approval_status'], 'approved')
+        self.assertEqual(resp.data['status'], 'confirmed')
+
+        so = SalesOrder.objects.get(id=so_id)
+        self.assertEqual(so.status, 'confirmed')
+        self.assertEqual(so.approval_status, 'approved')
+        self.assertEqual(so.approved_by_id, self.operator.id)
+        self.assertIsNotNone(so.approved_at)
+
+    def test_unauthorized_approve_returns_403(self):
+        """A user matching none of the authority criteria gets 403 on approve."""
+        from core.models import ApprovalRule, Role
+        ApprovalRule.objects.create(
+            organization=self.org, order_type='sales_order',
+            min_amount=Decimal('1000.00'),
+        )
+        so_id = self._create_so(quantity=10, unit_price='100.00')
+        self.client.post(f'/api/v1/sales/orders/{so_id}/confirm/')
+
+        outsider_role = Role.objects.create(
+            name='Outsider Role', organization=self.org, permissions={'sales': ['read']},
+        )
+        outsider = self.create_org_user(
+            'approval-outsider@easyerp.local', full_name='Outsider', role=outsider_role,
+        )
+        outsider_client = APIClient()
+        self._login(outsider_client, outsider)
+
+        resp = outsider_client.post(f'/api/v1/sales/orders/{so_id}/approve/')
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+        so = SalesOrder.objects.get(id=so_id)
+        self.assertEqual(so.approval_status, 'pending')

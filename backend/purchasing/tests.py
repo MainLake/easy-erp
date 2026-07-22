@@ -422,3 +422,113 @@ class PurchaseOrderTotalPropertyTests(OrgTestMixin, TestCase):
         is zero (proves the sum over an empty queryset, not a stub)."""
         po = PurchaseOrder.objects.create(supplier=self.supplier, organization=self.org)
         self.assertEqual(po.total, Decimal('0'))
+
+
+class PurchaseOrderApprovalGateTests(OrgTestMixin, TestCase):
+    """Phase 2: send_po gate wiring + approve/reject actions (mirrors sales)."""
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self.operator = self.create_org_user(
+            'po-approval-operator@easyerp.local', full_name='Operator User',
+        )
+        self._login(self.client, self.operator)
+
+        self.supplier = Supplier.objects.create(
+            name='Approval Supplier', tax_id='PO-APPROVAL-TAX-001', organization=self.org,
+        )
+        self.product = Product.objects.create(
+            sku='PO-APPROVAL-SKU-001', name='Part', cost='10', price='20',
+            organization=self.org,
+        )
+
+    def _create_po(self, quantity=10, unit_cost='100.00'):
+        resp = self.client.post('/api/v1/purchasing/orders/', {
+            'supplier': str(self.supplier.id),
+            'line_items_write': [{
+                'product': str(self.product.id),
+                'quantity': quantity,
+                'unit_cost': unit_cost,
+            }],
+        }, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        return resp.data['id']
+
+    def test_send_without_rule_unaffected(self):
+        """Zero-rules-configured: send proceeds unchanged, approval_status stays 'none'."""
+        po_id = self._create_po()
+        resp = self.client.post(f'/api/v1/purchasing/orders/{po_id}/send/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['status'], 'sent')
+        self.assertEqual(resp.data['approval_status'], 'none')
+
+    def test_send_over_threshold_blocks_and_returns_pending(self):
+        """Order total (1000) >= min_amount (1000) -> send blocked, 200 + pending."""
+        from core.models import ApprovalRule
+        ApprovalRule.objects.create(
+            organization=self.org, order_type='purchase_order',
+            min_amount=Decimal('1000.00'),
+        )
+        po_id = self._create_po(quantity=10, unit_cost='100.00')
+
+        resp = self.client.post(f'/api/v1/purchasing/orders/{po_id}/send/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['status'], 'draft')
+        self.assertEqual(resp.data['approval_status'], 'pending')
+
+        po = PurchaseOrder.objects.get(id=po_id)
+        self.assertEqual(po.status, 'draft')
+        self.assertEqual(po.approval_status, 'pending')
+        self.assertEqual(po.requested_by_id, self.operator.id)
+
+    def test_approve_by_owner_completes_transition(self):
+        """Owner approves a pending order -> approval_status='approved' and a
+        subsequent send (auto re-invoked by the approve action) completes."""
+        from core.models import ApprovalRule
+        ApprovalRule.objects.create(
+            organization=self.org, order_type='purchase_order',
+            min_amount=Decimal('1000.00'),
+        )
+        po_id = self._create_po(quantity=10, unit_cost='100.00')
+        self.client.post(f'/api/v1/purchasing/orders/{po_id}/send/')
+
+        owner_membership = self.operator.memberships.get(organization=self.org)
+        owner_membership.is_owner = True
+        owner_membership.save()
+
+        resp = self.client.post(f'/api/v1/purchasing/orders/{po_id}/approve/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['approval_status'], 'approved')
+        self.assertEqual(resp.data['status'], 'sent')
+
+        po = PurchaseOrder.objects.get(id=po_id)
+        self.assertEqual(po.status, 'sent')
+        self.assertEqual(po.approval_status, 'approved')
+        self.assertEqual(po.approved_by_id, self.operator.id)
+        self.assertIsNotNone(po.approved_at)
+
+    def test_unauthorized_approve_returns_403(self):
+        """A user matching none of the authority criteria gets 403 on approve."""
+        from core.models import ApprovalRule, Role
+        ApprovalRule.objects.create(
+            organization=self.org, order_type='purchase_order',
+            min_amount=Decimal('1000.00'),
+        )
+        po_id = self._create_po(quantity=10, unit_cost='100.00')
+        self.client.post(f'/api/v1/purchasing/orders/{po_id}/send/')
+
+        outsider_role = Role.objects.create(
+            name='PO Outsider Role', organization=self.org, permissions={'purchasing': ['read']},
+        )
+        outsider = self.create_org_user(
+            'po-approval-outsider@easyerp.local', full_name='Outsider', role=outsider_role,
+        )
+        outsider_client = APIClient()
+        self._login(outsider_client, outsider)
+
+        resp = outsider_client.post(f'/api/v1/purchasing/orders/{po_id}/approve/')
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+        po = PurchaseOrder.objects.get(id=po_id)
+        self.assertEqual(po.approval_status, 'pending')

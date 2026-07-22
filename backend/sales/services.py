@@ -27,7 +27,7 @@ def _validate_transition(so: SalesOrder, new_status: str) -> None:
         })
 
 
-def confirm_so(*, so_id) -> SalesOrder:
+def confirm_so(*, so_id, user=None) -> SalesOrder:
     """Transition a SalesOrder from draft → confirmed.
 
     Validates that sufficient stock exists for every line item
@@ -36,10 +36,20 @@ def confirm_so(*, so_id) -> SalesOrder:
 
     Raises ValidationError with per-line-item details when
     stock is insufficient.
+
+    If an active ``ApprovalRule`` matches this order's total, the
+    transition is blocked and ``approval_status`` is stamped 'pending'
+    instead (see core.approvals.evaluate_gate). Zero-rules-configured
+    orgs see no behavior change.
     """
+    from core.approvals import evaluate_gate
+
     with transaction.atomic():
         so = SalesOrder.objects.select_for_update().get(id=so_id)
         _validate_transition(so, SalesOrder.Status.CONFIRMED)
+
+        if evaluate_gate(order=so, order_type='sales_order', user=user) == 'pending':
+            return so
 
         errors = {}
         for line in so.line_items.select_related('product', 'warehouse').all():
