@@ -4,9 +4,11 @@
  * Attaches the Bearer token and X-Organization header to every request.
  * On a 401 response, attempts a silent token refresh before rejecting.
  */
+import { activeOrg } from './useAuth'
+
 export const useApi = () => {
   const config = useRuntimeConfig()
-  const { getAccessToken, getRefreshToken, tryRefresh, activeOrg } = useAuth()
+  const { getAccessToken, getRefreshToken, tryRefresh } = useAuth()
 
   const request = async (
     endpoint: string,
