@@ -423,6 +423,24 @@ class PurchaseOrderTotalPropertyTests(OrgTestMixin, TestCase):
         po = PurchaseOrder.objects.create(supplier=self.supplier, organization=self.org)
         self.assertEqual(po.total, Decimal('0'))
 
+    def test_total_quantity_sums_line_items(self):
+        """GIVEN a PO with two line items / WHEN reading `.total_quantity`
+        / THEN it equals sum(quantity) across all lines."""
+        po = PurchaseOrder.objects.create(supplier=self.supplier, organization=self.org)
+        po.line_items.create(
+            product=self.product_a, quantity=4, unit_cost=Decimal('20.00'),
+        )
+        po.line_items.create(
+            product=self.product_b, quantity=1, unit_cost=Decimal('10.00'),
+        )
+        self.assertEqual(po.total_quantity, 5)
+
+    def test_total_quantity_is_zero_with_no_line_items(self):
+        """GIVEN a PO with no line items / WHEN reading `.total_quantity`
+        / THEN it is zero."""
+        po = PurchaseOrder.objects.create(supplier=self.supplier, organization=self.org)
+        self.assertEqual(po.total_quantity, 0)
+
 
 class PurchaseOrderApprovalGateTests(OrgTestMixin, TestCase):
     """Phase 2: send_po gate wiring + approve/reject actions (mirrors sales)."""

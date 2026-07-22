@@ -122,6 +122,11 @@ class SalesOrder(BaseModel):
             Decimal('0'),
         )
 
+    @property
+    def total_quantity(self):
+        """Sum of quantity across all line items."""
+        return sum((li.quantity for li in self.line_items.all()), 0)
+
 
 class SOLineItem(BaseModel):
     """Individual line item on a sales order."""

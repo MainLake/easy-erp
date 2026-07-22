@@ -16,13 +16,44 @@ Zero-rules-configured orgs get a pure no-op: the first query returns None,
 from core.models import ApprovalRule, OrganizationMembership
 
 
+def _rule_matches(rule, order) -> bool:
+    """True if every SET condition on *rule* holds for *order*.
+
+    Unset (None) conditions are skipped. ``min_quantity`` is scoped to
+    ``rule.product`` when a product is set (sum of that product's line
+    quantities), otherwise it measures the order-wide ``total_quantity``.
+    A single ``line_items.all()`` fetch avoids N+1 across the checks.
+    """
+    lines = list(order.line_items.all())
+
+    if rule.min_amount is not None and order.total < rule.min_amount:
+        return False
+
+    if rule.min_quantity is not None:
+        if rule.product_id is not None:
+            qty = sum(li.quantity for li in lines if li.product_id == rule.product_id)
+        else:
+            qty = sum(li.quantity for li in lines)
+        if qty < rule.min_quantity:
+            return False
+
+    if rule.product_id is not None:
+        if not any(li.product_id == rule.product_id for li in lines):
+            return False
+
+    if rule.min_amount is None and rule.min_quantity is None and rule.product_id is None:
+        return False
+
+    return True
+
+
 def evaluate_gate(*, order, order_type: str, user) -> str:
     """Resolve whether *order* may proceed through its confirm/send gate.
 
     Returns one of:
-      - 'not_required': no active rule matches, or the order total is
-        below the rule's min_amount. If the order was previously stamped
-        'pending' (rule deactivated/deleted since), it is reset to 'none'.
+      - 'not_required': no active rule matches (see ``_rule_matches``). If
+        the order was previously stamped 'pending' (rule deactivated,
+        deleted, or no longer matches), it is reset to 'none'.
       - 'approved': the order was already approved; the transition may proceed.
       - 'pending': an active rule requires approval; the order is stamped
         'pending' with `requested_by` set, and the caller MUST NOT proceed
@@ -37,7 +68,7 @@ def evaluate_gate(*, order, order_type: str, user) -> str:
         is_active=True,
     ).first()
 
-    if rule is None or order.total < rule.min_amount:
+    if rule is None or not _rule_matches(rule, order):
         if order.approval_status == 'pending':
             order.approval_status = 'none'
             order.save(update_fields=['approval_status'])
