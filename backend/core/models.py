@@ -445,3 +445,65 @@ class CustomFieldValue(BaseModel):
 
     def __str__(self):
         return f'{self.field.name} = {self.value[:50]}'
+
+
+# ---------------------------------------------------------------------------
+# Approval Rules — org-configurable threshold approval for orders
+# ---------------------------------------------------------------------------
+
+ORDER_TYPES = [
+    ('sales_order', 'Sales Order'),
+    ('purchase_order', 'Purchase Order'),
+]
+
+
+class ApprovalRule(BaseModel):
+    """Org-scoped threshold that gates confirm/send transitions.
+
+    When an active rule exists for an order's ``order_type`` and the
+    order's total is >= ``min_amount``, the transition is blocked until
+    an authorized approver (owner, ``approver_role`` holder, or a user
+    listed in ``approver_users``) approves it. See ``core.approvals``
+    for the gate and authority-resolution logic. Orgs with no rule
+    (or an inactive one) see zero behavior change.
+    """
+
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name='approval_rules',
+    )
+    order_type = models.CharField(
+        max_length=20,
+        choices=ORDER_TYPES,
+        help_text='Which order type this rule gates.',
+    )
+    min_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        help_text='Orders with total >= this amount require approval.',
+    )
+    approver_role = models.ForeignKey(
+        Role,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approval_rules',
+        help_text='Members holding this role may approve/reject.',
+    )
+    approver_users = models.ManyToManyField(
+        User,
+        blank=True,
+        related_name='approval_rules',
+        help_text='Individually authorized approvers, in addition to role holders.',
+    )
+    is_active = models.BooleanField(default=True)
+
+    objects = OrgAwareManager()
+
+    class Meta:
+        unique_together = ['organization', 'order_type']
+        ordering = ['organization', 'order_type']
+
+    def __str__(self):
+        return f'{self.get_order_type_display()} >= {self.min_amount} [{self.organization.name}]'

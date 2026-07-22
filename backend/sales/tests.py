@@ -9,6 +9,7 @@ Spec coverage:
 """
 
 import json
+from decimal import Decimal
 
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -499,3 +500,41 @@ class SalesOrderFulfillmentTests(OrgTestMixin, TestCase):
             product=self.product, warehouse=self.warehouse,
         )
         self.assertEqual(level.quantity, 10)
+
+
+class SalesOrderTotalPropertyTests(OrgTestMixin, TestCase):
+    """`total` property: sum(quantity * unit_price) across line items."""
+
+    def setUp(self):
+        super().setUp()
+        self.customer = Customer.objects.create(
+            name='Total Customer', tax_id='TOTAL-TAX-001', organization=self.org,
+        )
+        self.product_a = Product.objects.create(
+            sku='TOTAL-SKU-A', name='Widget A', cost='5', price='30',
+            organization=self.org,
+        )
+        self.product_b = Product.objects.create(
+            sku='TOTAL-SKU-B', name='Widget B', cost='5', price='15',
+            organization=self.org,
+        )
+
+    def test_total_sums_line_items(self):
+        """GIVEN a SO with two line items / WHEN reading `.total` / THEN it
+        equals sum(quantity * unit_price) across all lines."""
+        so = SalesOrder.objects.create(customer=self.customer, organization=self.org)
+        so.line_items.create(
+            product=self.product_a, quantity=3, unit_price=Decimal('30.00'),
+            warehouse=self.warehouse,
+        )
+        so.line_items.create(
+            product=self.product_b, quantity=2, unit_price=Decimal('15.00'),
+            warehouse=self.warehouse,
+        )
+        self.assertEqual(so.total, Decimal('120.00'))
+
+    def test_total_is_zero_with_no_line_items(self):
+        """GIVEN a SO with no line items / WHEN reading `.total` / THEN it
+        is zero (proves the sum over an empty queryset, not a stub)."""
+        so = SalesOrder.objects.create(customer=self.customer, organization=self.org)
+        self.assertEqual(so.total, Decimal('0'))
